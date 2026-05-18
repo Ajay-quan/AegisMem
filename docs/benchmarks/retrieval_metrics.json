@@ -1,0 +1,200 @@
+{
+  "metrics": {
+    "query_count": 10,
+    "memory_count": 70,
+    "precision_at_1": 1.0,
+    "precision_at_3": 0.5,
+    "recall_at_5": 0.9667,
+    "mrr": 1.0,
+    "avg_latency_ms": 10.3402,
+    "p95_latency_ms": 10.7547
+  },
+  "queries": [
+    {
+      "query": "python faiss local search",
+      "expected_keys": [
+        "python-pref",
+        "semantic-pipeline"
+      ],
+      "returned_keys": [
+        "python-pref",
+        "semantic-pipeline",
+        "aws-free-tier",
+        "hash-index",
+        "graph-bfs"
+      ],
+      "latency_ms": 10.9477,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "aws free tier ec2 ebs",
+      "expected_keys": [
+        "aws-free-tier",
+        "single-node",
+        "teardown"
+      ],
+      "returned_keys": [
+        "aws-free-tier",
+        "teardown",
+        "noise-39",
+        "python-pref",
+        "graph-bfs"
+      ],
+      "latency_ms": 10.7547,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.6666666666666666,
+      "recall_at_5": 0.6666666666666666,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "constant time hash lookup",
+      "expected_keys": [
+        "hash-index"
+      ],
+      "returned_keys": [
+        "hash-index",
+        "priority-cache",
+        "noise-22",
+        "noise-48",
+        "noise-1"
+      ],
+      "latency_ms": 10.2808,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "weighted graph bfs traversal",
+      "expected_keys": [
+        "graph-bfs"
+      ],
+      "returned_keys": [
+        "graph-bfs",
+        "python-pref",
+        "aws-free-tier",
+        "hash-index",
+        "docker-gunicorn"
+      ],
+      "latency_ms": 9.8801,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "docker gunicorn flask port",
+      "expected_keys": [
+        "docker-gunicorn"
+      ],
+      "returned_keys": [
+        "docker-gunicorn",
+        "python-pref",
+        "aws-free-tier",
+        "hash-index",
+        "graph-bfs"
+      ],
+      "latency_ms": 10.1017,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "priority queue recency tree cache",
+      "expected_keys": [
+        "priority-cache"
+      ],
+      "returned_keys": [
+        "priority-cache",
+        "python-pref",
+        "aws-free-tier",
+        "hash-index",
+        "graph-bfs"
+      ],
+      "latency_ms": 10.2824,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "embedding vector faiss pipeline",
+      "expected_keys": [
+        "python-pref",
+        "semantic-pipeline"
+      ],
+      "returned_keys": [
+        "python-pref",
+        "semantic-pipeline",
+        "aws-free-tier",
+        "hash-index",
+        "graph-bfs"
+      ],
+      "latency_ms": 10.096,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "delete aws resources teardown",
+      "expected_keys": [
+        "aws-free-tier",
+        "teardown"
+      ],
+      "returned_keys": [
+        "teardown",
+        "aws-free-tier",
+        "python-pref",
+        "hash-index",
+        "graph-bfs"
+      ],
+      "latency_ms": 9.9641,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "openapi rest documentation",
+      "expected_keys": [
+        "openapi"
+      ],
+      "returned_keys": [
+        "openapi",
+        "python-pref",
+        "aws-free-tier",
+        "graph-bfs",
+        "docker-gunicorn"
+      ],
+      "latency_ms": 10.6509,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "single node no cost deployment",
+      "expected_keys": [
+        "aws-free-tier",
+        "single-node"
+      ],
+      "returned_keys": [
+        "single-node",
+        "aws-free-tier",
+        "noise-22",
+        "noise-48",
+        "noise-1"
+      ],
+      "latency_ms": 10.4435,
+      "precision_at_1": 1.0,
+      "precision_at_3": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0
+    }
+  ]
+}

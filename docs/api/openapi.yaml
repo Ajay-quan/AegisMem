@@ -1,0 +1,196 @@
+openapi: 3.0.3
+info:
+  title: AegisMem Flask Demo API
+  version: 0.2.0
+  description: REST API for memory ingestion, semantic retrieval, exact hash lookup, lifecycle updates, version history, import/export, deletion, and graph traversal.
+servers:
+  - url: http://127.0.0.1:8000
+security:
+  - ApiKeyAuth: []
+paths:
+  /:
+    get:
+      security: []
+      summary: Local browser demo UI
+      responses:
+        '200': {description: HTML demo page}
+  /health:
+    get:
+      security: []
+      summary: Health check
+      responses:
+        '200': {description: Service status}
+  /api/v1/memories:
+    post:
+      summary: Ingest a memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IngestRequest'}
+      responses:
+        '201': {description: Created memory}
+        '400': {description: Validation error}
+        '401': {description: Invalid API key}
+    get:
+      summary: List memories for a user
+      parameters:
+        - in: query
+          name: user_id
+          required: true
+          schema: {type: string}
+        - in: query
+          name: include_deleted
+          schema: {type: boolean, default: false}
+      responses:
+        '200': {description: Memory list}
+  /api/v1/ingest:
+    post:
+      summary: Ingest alias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IngestRequest'}
+      responses:
+        '201': {description: Created memory}
+  /api/v1/retrieve:
+    post:
+      summary: Semantic retrieval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RetrieveRequest'}
+      responses:
+        '200': {description: Retrieval results}
+  /api/v1/memories/{memory_id}:
+    get:
+      summary: Get memory by ID
+      parameters: [{$ref: '#/components/parameters/MemoryId'}]
+      responses:
+        '200': {description: Memory detail}
+        '404': {description: Not found}
+    patch:
+      summary: Update memory and append version history
+      parameters: [{$ref: '#/components/parameters/MemoryId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateRequest'}
+      responses:
+        '200': {description: Updated memory}
+        '404': {description: Not found}
+    delete:
+      summary: Soft-delete memory
+      parameters: [{$ref: '#/components/parameters/MemoryId'}]
+      responses:
+        '200': {description: Deleted memory}
+        '404': {description: Not found}
+  /api/v1/memories/{memory_id}/versions:
+    get:
+      summary: Get memory version history
+      parameters: [{$ref: '#/components/parameters/MemoryId'}]
+      responses:
+        '200': {description: Version history}
+        '404': {description: Not found}
+  /api/v1/memories/key/{user_id}/{key}:
+    get:
+      summary: Exact SHA-256 hash-key lookup
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: {type: string}
+        - in: path
+          name: key
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Memory found through SHA-256 hash index}
+        '404': {description: Not found}
+  /api/v1/graph/{memory_id}:
+    get:
+      summary: Traverse related memory graph with weighted BFS
+      parameters:
+        - $ref: '#/components/parameters/MemoryId'
+        - in: query
+          name: depth
+          schema: {type: integer, default: 2, minimum: 1, maximum: 5}
+      responses:
+        '200': {description: Related memories}
+  /api/v1/export:
+    get:
+      summary: Export memory records and version history
+      parameters:
+        - in: query
+          name: include_deleted
+          schema: {type: boolean, default: true}
+      responses:
+        '200': {description: Portable memory snapshot}
+  /api/v1/import:
+    post:
+      summary: Import memory records and rebuild indexes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportRequest'}
+      responses:
+        '200': {description: Import summary}
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    MemoryId:
+      in: path
+      name: memory_id
+      required: true
+      schema: {type: string}
+  schemas:
+    IngestRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: {type: string}
+        content: {type: string}
+        text: {type: string}
+        key: {type: string}
+        related_memory_ids:
+          type: array
+          items: {type: string}
+        metadata: {type: object}
+        tags:
+          type: array
+          items: {type: string}
+        importance_score: {type: number, minimum: 0, maximum: 1}
+    RetrieveRequest:
+      type: object
+      required: [user_id, query]
+      properties:
+        user_id: {type: string}
+        query: {type: string}
+        top_k: {type: integer, default: 5, minimum: 1, maximum: 50}
+    UpdateRequest:
+      type: object
+      properties:
+        content: {type: string}
+        key: {type: string}
+        metadata: {type: object}
+        tags:
+          type: array
+          items: {type: string}
+        importance_score: {type: number, minimum: 0, maximum: 1}
+    ImportRequest:
+      type: object
+      properties:
+        replace: {type: boolean, default: false}
+        records:
+          type: array
+          items: {type: object}
+        versions:
+          type: object

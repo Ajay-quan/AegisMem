@@ -1,0 +1,11 @@
+query,latency_ms,precision_at_1,precision_at_3,recall_at_5,reciprocal_rank
+python faiss local search,10.9477,1.0,0.6666666666666666,1.0,1.0
+aws free tier ec2 ebs,10.7547,1.0,0.6666666666666666,0.6666666666666666,1.0
+constant time hash lookup,10.2808,1.0,0.3333333333333333,1.0,1.0
+weighted graph bfs traversal,9.8801,1.0,0.3333333333333333,1.0,1.0
+docker gunicorn flask port,10.1017,1.0,0.3333333333333333,1.0,1.0
+priority queue recency tree cache,10.2824,1.0,0.3333333333333333,1.0,1.0
+embedding vector faiss pipeline,10.096,1.0,0.6666666666666666,1.0,1.0
+delete aws resources teardown,9.9641,1.0,0.6666666666666666,1.0,1.0
+openapi rest documentation,10.6509,1.0,0.3333333333333333,1.0,1.0
+single node no cost deployment,10.4435,1.0,0.6666666666666666,1.0,1.0
