@@ -9,6 +9,7 @@ from core.schemas.memory import (
     MemoryItem, MemoryType, MemoryLayer, SourceType, Observation, MemoryStatus,
 )
 from domain.memory.scoring import compute_importance_heuristic
+from core.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class IngestionService:
             except Exception as e:
                 logger.warning(f"Graph node creation failed: {e}")
 
+        metrics.inc_ingested()
         logger.info(
             f"Ingested memory {memory.memory_id} for user {memory.user_id} "
             f"(type={memory.memory_type}, importance={importance:.2f})"

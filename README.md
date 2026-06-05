@@ -43,26 +43,40 @@ The FastAPI app exports Prometheus metrics at `/metrics` (request counts/latency
 
 ## Architecture
 
+The primary product is the **FastAPI service**, organized as API → services → domain → adapters, with every external backend behind a swappable adapter (defaults run in-memory, zero infra):
+
 ```mermaid
 flowchart TD
-    C[Client or LLM Agent] --> API[Flask REST API on Gunicorn]
+    C[Client / LLM Agent / MCP] --> API[FastAPI on Uvicorn]
     API --> ING[Ingestion Service]
     API --> RET[Retrieval Service]
-    API --> LIFE[Lifecycle Service]
-    API --> GRAPH[Graph Traversal API]
-    ING --> EMB[LangChain Embeddings Adapter]
-    EMB --> FAISS[FAISS Vector DB on local EBS]
-    ING --> JSON[JSON Canonical Store]
-    RET --> FAISS
-    RET --> HOT[HotMemoryIndex priority queue + hash map + recency tree]
-    LIFE --> JSON
-    GRAPH --> MEMG[LocalMemoryGraph weighted BFS]
-    JSON --> EBS[(8 GB gp3 EBS volume)]
-    FAISS --> EBS
-    MEMG --> EBS
+    API --> LIFE[Lifecycle / Update Service]
+    API --> COG[Contradiction / Reflection Services]
+    API --> OBS[/metrics + JSON logs/]
+
+    RET --> DENSE[Dense semantic search]
+    RET --> BM25[BM25 lexical search]
+    DENSE --> RRF[Reciprocal Rank Fusion]
+    BM25 --> RRF
+    RRF --> RERANK[Reranker: heuristic / cross-encoder]
+
+    subgraph Adapters [Pluggable adapters]
+        REL[(Relational: in-memory / Postgres)]
+        VEC[(Vector: in-memory / Qdrant)]
+        GR[(Graph: in-memory / Neo4j)]
+        EMB[Embeddings: mock / sentence-transformers / OpenAI]
+    end
+
+    ING --> REL
+    ING --> VEC
+    ING --> GR
+    ING --> EMB
+    RET --> REL
+    DENSE --> VEC
+    RERANK --> C
 ```
 
-Editable diagram source: `architecture.drawio`.
+The single-node **Flask demo** (`apps/flask_app.py`) is the secondary, zero-cost path used for the AWS Free Tier runbook: Flask + local FAISS + JSON canonical store on one EC2 instance. Editable diagram source: `architecture.drawio`.
 
 ## Audit Summary
 

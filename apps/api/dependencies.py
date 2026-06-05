@@ -106,9 +106,21 @@ async def get_graph_store() -> MockGraphStore:
 
 
 def get_embedding() -> EmbeddingBackend:
+    """Resolve the configured embedding backend.
+
+    Only API-backed backends require a key; local ones (sentence_transformers)
+    and the deterministic ``mock`` backend do not. We therefore fall back to
+    ``mock`` solely when an API-backed backend is selected without its key, so
+    setting ``EMBEDDING_BACKEND=sentence_transformers`` actually runs local
+    embeddings as the docs claim.
+    """
     backend = settings.embedding_backend
-    # In production: use sentence_transformers. In test/dev: use mock
-    if not settings.openai_api_key and not settings.anthropic_api_key:
+    needs_key = backend in ("openai", "voyage")
+    if needs_key and not (settings.openai_api_key or settings.anthropic_api_key):
+        logger.warning(
+            f"Embedding backend '{backend}' needs an API key but none is set; "
+            "falling back to 'mock'."
+        )
         backend = "mock"
     return get_embedding_backend(backend, settings.embedding_model)
 

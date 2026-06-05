@@ -23,6 +23,7 @@ from domain.memory.lexical import (
     BM25Index, reciprocal_rank_fusion, normalize_scores,
 )
 from domain.memory.reranker import build_reranker
+from core.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,11 @@ class RetrievalService:
             except Exception:
                 pass
 
-        latency_ms = (time.time() - start) * 1000
+        latency_s = time.time() - start
+        latency_ms = latency_s * 1000
 
         mode = "hybrid" if (settings.hybrid_retrieval_enabled and lexical_candidates) else "dense"
+        metrics.observe_retrieval(mode, latency_s)
         logger.info(
             f"Retrieved {len(reranked)}/{len(filtered)} memories for user={query.user_id} "
             f"in {latency_ms:.1f}ms (mode={mode}, dense={len(semantic_candidates)}, "
