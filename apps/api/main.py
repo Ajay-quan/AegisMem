@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.logging.logger import setup_logging, new_request_id, set_context
+from core.observability import metrics
 from apps.api.routers import router
 from apps.api.eval_router import eval_router
 from apps.api.schemas import HealthResponse
@@ -71,9 +72,16 @@ def create_app() -> FastAPI:
         request_id = new_request_id()
         start = time.time()
         response = await call_next(request)
-        duration_ms = (time.time() - start) * 1000
+        duration_s = time.time() - start
+        duration_ms = duration_s * 1000
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time"] = f"{duration_ms:.1f}ms"
+        # Use the route template (not the raw path) to keep metric cardinality low.
+        route = request.scope.get("route")
+        path_label = getattr(route, "path", request.url.path)
+        metrics.observe_request(
+            request.method, path_label, response.status_code, duration_s,
+        )
         logger.info(
             f"{request.method} {request.url.path} -> {response.status_code} "
             f"({duration_ms:.1f}ms) rid={request_id}"
@@ -100,6 +108,11 @@ def create_app() -> FastAPI:
                 "config": settings.app_env,
             },
         )
+
+    # Prometheus metrics exporter
+    @app.get("/metrics", tags=["system"])
+    async def prometheus_metrics():
+        return Response(content=metrics.render(), media_type=metrics.CONTENT_TYPE_LATEST)
 
     @app.get("/", tags=["system"])
     async def root():

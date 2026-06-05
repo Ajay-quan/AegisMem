@@ -86,6 +86,7 @@ services:
     container_name: aegismem_api
     environment:
       APP_ENV: development
+      RELATIONAL_STORE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: aegismem
@@ -130,6 +131,7 @@ services:
     container_name: aegismem_worker
     environment:
       APP_ENV: development
+      RELATIONAL_STORE: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: aegismem_password
       REDIS_URL: redis://redis:6379/0

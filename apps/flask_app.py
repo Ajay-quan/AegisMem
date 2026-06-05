@@ -7,94 +7,8 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from apps.landing_page import DEMO_HTML, LANDING_HTML
 from services.flask_memory_service import FlaskMemoryService
-
-
-INDEX_HTML = """
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AegisMem Demo</title>
-  <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; color: #172033; background: #f7f8fb; }
-    main { max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
-    h1 { margin: 0 0 6px; font-size: 32px; }
-    h2 { font-size: 18px; margin-top: 0; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 16px; }
-    section { background: white; border: 1px solid #d9deea; border-radius: 8px; padding: 16px; }
-    label { display: block; font-size: 13px; font-weight: 650; margin: 10px 0 4px; }
-    input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #c7cfdd; border-radius: 6px; padding: 9px; font: inherit; }
-    textarea { min-height: 82px; resize: vertical; }
-    button { margin-top: 12px; border: 0; border-radius: 6px; background: #244fd6; color: white; padding: 10px 13px; font-weight: 700; cursor: pointer; }
-    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #101827; color: #e7edf8; padding: 14px; border-radius: 8px; min-height: 160px; }
-    .hint { color: #596579; margin: 0 0 22px; }
-  </style>
-</head>
-<body>
-<main>
-  <h1>AegisMem</h1>
-  <p class="hint">Local memory lifecycle demo: ingest, retrieve, exact key lookup, graph traversal, import, and export.</p>
-  <div class="grid">
-    <section>
-      <h2>Ingest</h2>
-      <label>User ID</label><input id="ingest-user" value="alice" />
-      <label>Key</label><input id="ingest-key" value="python-pref" />
-      <label>Content</label><textarea id="ingest-content">Alice prefers Python and FAISS for local vector search.</textarea>
-      <button onclick="ingest()">Ingest</button>
-    </section>
-    <section>
-      <h2>Retrieve</h2>
-      <label>User ID</label><input id="retrieve-user" value="alice" />
-      <label>Query</label><input id="retrieve-query" value="FAISS vector search" />
-      <button onclick="retrieveMemories()">Retrieve</button>
-    </section>
-    <section>
-      <h2>Exact Lookup</h2>
-      <label>User ID</label><input id="lookup-user" value="alice" />
-      <label>Key</label><input id="lookup-key" value="python-pref" />
-      <button onclick="lookupKey()">Lookup</button>
-    </section>
-    <section>
-      <h2>Graph</h2>
-      <label>Memory ID</label><input id="graph-id" placeholder="Paste memory_id" />
-      <button onclick="graph()">Traverse</button>
-    </section>
-    <section>
-      <h2>Export / Import</h2>
-      <button onclick="exportData()">Export</button>
-      <label>Import JSON</label><textarea id="import-json" placeholder='{"records": [...]}'></textarea>
-      <button onclick="importData()">Import</button>
-    </section>
-    <section>
-      <h2>Output</h2>
-      <pre id="output">Ready.</pre>
-    </section>
-  </div>
-</main>
-<script>
-const apiKey = localStorage.getItem('aegismem_api_key') || '';
-function headers() { const h = {'Content-Type': 'application/json'}; if (apiKey) h['X-API-Key'] = apiKey; return h; }
-function show(data) { document.getElementById('output').textContent = JSON.stringify(data, null, 2); }
-async function ingest() {
-  const body = {user_id: val('ingest-user'), key: val('ingest-key'), content: val('ingest-content')};
-  const res = await fetch('/api/v1/memories', {method:'POST', headers: headers(), body: JSON.stringify(body)});
-  const data = await res.json(); show(data); if (data.memory) document.getElementById('graph-id').value = data.memory.memory_id;
-}
-async function retrieveMemories() {
-  const body = {user_id: val('retrieve-user'), query: val('retrieve-query'), top_k: 5};
-  show(await (await fetch('/api/v1/retrieve', {method:'POST', headers: headers(), body: JSON.stringify(body)})).json());
-}
-async function lookupKey() { show(await (await fetch(`/api/v1/memories/key/${encodeURIComponent(val('lookup-user'))}/${encodeURIComponent(val('lookup-key'))}`, {headers: headers()})).json()); }
-async function graph() { show(await (await fetch(`/api/v1/graph/${encodeURIComponent(val('graph-id'))}?depth=2`, {headers: headers()})).json()); }
-async function exportData() { const data = await (await fetch('/api/v1/export', {headers: headers()})).json(); document.getElementById('import-json').value = JSON.stringify(data, null, 2); show(data); }
-async function importData() { show(await (await fetch('/api/v1/import', {method:'POST', headers: headers(), body: val('import-json')})).json()); }
-function val(id) { return document.getElementById(id).value; }
-</script>
-</body>
-</html>
-"""
 
 
 class ApiError(ValueError):
@@ -121,7 +35,7 @@ def create_app() -> Flask:
 
     @app.before_request
     def require_api_key():
-        if not api_key or request.path in {"/", "/health"}:
+        if not api_key or request.path in {"/", "/demo", "/health"}:
             return None
         if request.headers.get("X-API-Key") != api_key:
             return error_response("invalid or missing API key", 401, code="unauthorized")
@@ -141,7 +55,11 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return INDEX_HTML
+        return LANDING_HTML
+
+    @app.get("/demo")
+    def demo():
+        return DEMO_HTML
 
     @app.get("/health")
     def health():

@@ -1,13 +1,22 @@
-Flask==3.0.3
-gunicorn==22.0.0
-langchain-core==0.2.43
-faiss-cpu==1.8.0.post1
-chromadb==0.5.23
-sentence-transformers==3.0.1
-numpy==1.26.4
+# AegisMem core runtime — boots the FastAPI service end-to-end with NO external
+# infrastructure (in-memory relational + vector + graph stores, deterministic
+# mock embeddings). This set matches the lean core in pyproject.toml.
+#
+#   pip install -r requirements.txt
+#   AEGISMEM_RELATIONAL_STORE=memory uvicorn apps.api.main:app --reload
+#
+# Opt into heavier capabilities via pyproject extras, e.g.:
+#   pip install -e ".[postgres,qdrant,neo4j,embeddings,llm,observability,mcp]"
+# For the standalone Flask demo, use requirements-flask-demo.txt instead.
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
 pydantic==2.8.2
 pydantic-settings==2.4.0
+numpy==1.26.4
 python-dotenv==1.0.1
-pytest==8.3.2
-transformers==4.44.2
-tokenizers==0.19.1
+
+# Observability (structured JSON logs + Prometheus /metrics). Optional but
+# included by default so logging and the metrics exporter work out of the box.
+prometheus-client==0.20.0
+python-json-logger==2.0.7

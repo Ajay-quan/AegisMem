@@ -13,7 +13,9 @@ from adapters.llm.factory import create_llm_client
 from adapters.llm.base import LLMClient
 from adapters.vector_store.qdrant_store import InMemoryVectorStore, QdrantStore
 from adapters.graph_store.neo4j_store import MockGraphStore, GraphStore
-from adapters.relational_store.postgres_store import PostgresStore
+from adapters.relational_store.memory_store import InMemoryRelationalStore
+# PostgresStore (and its SQLAlchemy dependency) is imported lazily so the
+# zero-infra in-memory default has no hard dependency on a SQL stack.
 from services.ingest_service import IngestionService
 from services.retrieve_service import RetrievalService
 from services.update_service import UpdateService
@@ -23,16 +25,37 @@ from services.contradiction_service import ContradictionService
 logger = logging.getLogger(__name__)
 
 # Global singletons (initialized at startup)
-_db_store: PostgresStore | None = None
+_db_store: InMemoryRelationalStore | None = None
 _vector_store: InMemoryVectorStore | None = None
 _graph_store: MockGraphStore | None = None
 
 
-async def get_db_store() -> PostgresStore:
+async def get_db_store() -> InMemoryRelationalStore:
+    """Return the relational store.
+
+    Defaults to the zero-infra in-memory store so the service boots anywhere.
+    Set ``AEGISMEM_RELATIONAL_STORE=postgres`` for the production store; if
+    Postgres is selected but unreachable, we fall back to in-memory rather than
+    failing startup.
+    """
     global _db_store
     if _db_store is None:
-        _db_store = PostgresStore(settings.postgres_url)
-        await _db_store.initialize()
+        if settings.relational_store == "postgres":
+            try:
+                from adapters.relational_store.postgres_store import PostgresStore
+                store = PostgresStore(settings.postgres_url)
+                await store.initialize()
+                _db_store = store
+                logger.info("Using PostgreSQL relational store")
+            except Exception as e:
+                logger.warning(f"Postgres unavailable ({e}); using in-memory store")
+                store = InMemoryRelationalStore(settings.data_dir)
+                await store.initialize()
+                _db_store = store
+        else:
+            store = InMemoryRelationalStore(settings.data_dir)
+            await store.initialize()
+            _db_store = store
     return _db_store
 
 
@@ -100,7 +123,7 @@ def get_llm() -> LLMClient:
 
 
 async def get_ingest_service(
-    db: Annotated[PostgresStore, Depends(get_db_store)],
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
     graph: Annotated[MockGraphStore, Depends(get_graph_store)],
 ) -> IngestionService:
@@ -114,7 +137,7 @@ async def get_ingest_service(
 
 
 async def get_retrieve_service(
-    db: Annotated[PostgresStore, Depends(get_db_store)],
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
 ) -> RetrievalService:
     return RetrievalService(
@@ -125,7 +148,7 @@ async def get_retrieve_service(
 
 
 async def get_update_service(
-    db: Annotated[PostgresStore, Depends(get_db_store)],
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
     ingest: Annotated[IngestionService, Depends(get_ingest_service)],
 ) -> UpdateService:
@@ -139,7 +162,7 @@ async def get_update_service(
 
 
 async def get_reflect_service(
-    db: Annotated[PostgresStore, Depends(get_db_store)],
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
     ingest: Annotated[IngestionService, Depends(get_ingest_service)],
 ) -> ReflectionService:
     return ReflectionService(
@@ -150,7 +173,7 @@ async def get_reflect_service(
 
 
 async def get_contradiction_service(
-    db: Annotated[PostgresStore, Depends(get_db_store)],
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
     graph: Annotated[MockGraphStore, Depends(get_graph_store)],
 ) -> ContradictionService:

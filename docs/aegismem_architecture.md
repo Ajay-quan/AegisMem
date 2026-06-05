@@ -37,6 +37,20 @@ The production-style container runs Gunicorn and mounts `/data/aegismem` to an E
 5. Related IDs are connected in the local graph.
 6. Retrieval embeds the query, searches FAISS, filters by user/status, and hydrates full records from the JSON store.
 
+## Primary Service (FastAPI) and Hybrid Retrieval
+
+The repository has two entry points. The **Flask demo** (described above) is a single-file, zero-cost deployment for AWS Free Tier using local FAISS + JSON. The **FastAPI service** (`apps/api/`) is the primary product: a layered system (API → services → domain → adapters) with pluggable backends for the relational store (in-memory or PostgreSQL), vector store (in-memory or Qdrant), and graph store (in-memory or Neo4j). It boots end-to-end with no external infrastructure by defaulting to in-memory stores and deterministic mock embeddings; production backends are selected purely through configuration (`RELATIONAL_STORE`, `EMBEDDING_BACKEND`, etc.).
+
+Retrieval in the FastAPI service is a **hybrid** pipeline rather than dense-only:
+
+1. Dense semantic search over-retrieves a broad candidate pool from the vector store.
+2. Sparse **BM25** search (`domain/memory/lexical.py`, pure Python) ranks the user's memory corpus on lexical overlap, recovering rare tokens, names, and identifiers that dense embeddings under-weight.
+3. The two ranked lists are merged with **Reciprocal Rank Fusion** (`k=60`), which is robust to the fact that BM25 scores and cosine similarities are not directly comparable.
+4. Each fused candidate is scored on a weighted composite of semantic, lexical, recency (exponential decay), importance, and access-frequency signals. Similarity scores are clamped to `[0, 1]` so negative cosine values never silently drop candidates.
+5. A second-stage reranker applies diversity filtering and returns the top-k. The default is a heuristic reranker; a cross-encoder reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) is available via configuration and loads lazily with graceful fallback.
+
+The service is also exposed over the **Model Context Protocol** (`integrations/mcp_server.py`) so any MCP-capable agent can use AegisMem's memory directly through `remember`, `recall`, `forget`, and `list_memories` tools.
+
 ## Algorithms and Data Structures
 
 Hash-indexed exact lookup stores `sha256(user_id:key) -> memory_id`, which provides constant-time lookup for named memories.
@@ -63,17 +77,25 @@ The benchmark in `scripts/evaluate_memory_retrieval.py` seeds synthetic memories
 
 The Free Tier deployment is a single-node demonstration, not a horizontally distributed production cluster. The local embedding fallback is deterministic and free, but a real deployment can switch to sentence-transformers for stronger semantic quality. The current benchmark is synthetic; a stronger paper would add real agent traces and human-labeled relevance judgments.
 
+## Implemented since first draft
+
+- Hybrid retrieval: BM25 sparse search fused with dense search via Reciprocal Rank Fusion.
+- Working cross-encoder reranker (lazy-loaded, with heuristic fallback).
+- Zero-infra in-memory relational store so the full FastAPI service runs with no database.
+- MCP server exposing memory as agent tools.
+- Prometheus `/metrics` exporter and structured JSON logging.
+- Optional Chroma persistent adapter; API-key auth; import/export snapshots.
+
 ## Future Work
 
-- Add larger retrieval benchmarks with noisy memories.
-- Add optional Chroma persistent adapter.
-- Add auth and request rate limiting.
-- Add import/export tooling for memory snapshots.
-- Add multi-process consistency tests for concurrent writes.
+- Cognitive layer depth: forgetting/salience model, episodic→semantic consolidation at scale, and a temporal knowledge graph for relationship reasoning.
+- Real-corpus evaluation on standard memory benchmarks (LoCoMo, LongMemEval) with dense-vs-hybrid-vs-reranker ablations, replacing the synthetic benchmark.
+- Per-tenant authn/z (scoped keys / JWT), rate limiting, and PII redaction at ingest.
+- Multi-process consistency tests for concurrent writes; rate limiting; larger noisy benchmarks.
 
 ## Security and Portability Additions
 
-The Flask demo supports optional API-key authentication through `AEGISMEM_API_KEY`. When configured, all API routes require `X-API-Key`; `/` and `/health` stay public for status and local UI access.
+The Flask demo supports optional API-key authentication through `AEGISMEM_API_KEY`. When configured, all API routes require `X-API-Key`; `/`, `/demo`, and `/health` stay public for status and local UI access.
 
 Memory updates append prior record states to version history instead of silently overwriting content. Import/export endpoints allow a complete memory snapshot to be saved, restored, or moved between local and EC2 demo environments without using S3 or a managed database.
 

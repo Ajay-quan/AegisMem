@@ -19,7 +19,10 @@ from core.schemas.memory import (
     MemoryItem, RetrievalQuery, RetrievalResult, RetrievalCandidate,
 )
 from domain.memory.scoring import score_memory_for_retrieval, rank_candidates
-from domain.memory.reranker import HeuristicReranker
+from domain.memory.lexical import (
+    BM25Index, reciprocal_rank_fusion, normalize_scores,
+)
+from domain.memory.reranker import build_reranker
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +41,28 @@ class RetrievalService:
         self._vs = vector_store
         self._embed = embedding_backend
         self._graph = graph_store
-        self._reranker = HeuristicReranker(
-            diversity_threshold=settings.diversity_threshold,
-        )
+        self._reranker = build_reranker(settings)
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Main retrieval entry point — full multi-stage pipeline."""
         start = time.time()
 
-        # Stage 1: Broad semantic retrieval (over-retrieve).
+        # Stage 1a: Broad dense semantic retrieval (over-retrieve).
         semantic_candidates = await self._semantic_search(query)
+
+        # Stage 1b: Sparse lexical retrieval (BM25) when hybrid mode is on.
+        lexical_candidates: list[tuple[str, float]] = []
+        if settings.hybrid_retrieval_enabled:
+            lexical_candidates = await self._lexical_search(query)
+
+        # Stage 1c: Fuse dense + sparse rankings with Reciprocal Rank Fusion.
+        fused_ids, semantic_map, lexical_map = self._fuse(
+            semantic_candidates, lexical_candidates, query,
+        )
 
         # Stage 2: Enrich with full records + multi-signal scoring.
         enriched = await self._enrich_candidates(
-            semantic_candidates, query,
+            fused_ids, semantic_map, lexical_map, query,
         )
 
         # Stage 3: Symbolic filters (time range, type, importance).
@@ -74,9 +85,11 @@ class RetrievalService:
 
         latency_ms = (time.time() - start) * 1000
 
+        mode = "hybrid" if (settings.hybrid_retrieval_enabled and lexical_candidates) else "dense"
         logger.info(
             f"Retrieved {len(reranked)}/{len(filtered)} memories for user={query.user_id} "
-            f"in {latency_ms:.1f}ms (candidates={len(enriched)})"
+            f"in {latency_ms:.1f}ms (mode={mode}, dense={len(semantic_candidates)}, "
+            f"lexical={len(lexical_candidates)}, fused={len(enriched)})"
         )
 
         return RetrievalResult(
@@ -114,24 +127,83 @@ class RetrievalService:
             logger.warning(f"Semantic search failed, falling back to DB: {e}")
             return []
 
-    async def _enrich_candidates(
+    async def _lexical_search(
+        self, query: RetrievalQuery,
+    ) -> list[tuple[str, float]]:
+        """Sparse BM25 search over the user's memory corpus.
+
+        Returns ``(memory_id, bm25_score)`` ranked high→low. Pure-Python and
+        infra-free; complements dense search on rare tokens, names, and IDs.
+        """
+        try:
+            memories = await self._db.list_memories(
+                user_id=query.user_id,
+                namespace=query.namespace,
+                limit=settings.lexical_candidate_pool,
+            )
+            if not memories:
+                return []
+            index = BM25Index.build(
+                [(m.memory_id, m.content) for m in memories],
+                k1=settings.bm25_k1,
+                b=settings.bm25_b,
+            )
+            pool = max(settings.retrieval_top_n_candidates, query.top_k * 4)
+            return index.search(query.query_text, top_k=pool)
+        except Exception as e:
+            logger.warning(f"Lexical search failed: {e}")
+            return []
+
+    def _fuse(
         self,
         semantic_hits: list[tuple[str, float]],
+        lexical_hits: list[tuple[str, float]],
+        query: RetrievalQuery,
+    ) -> tuple[list[str], dict[str, float], dict[str, float]]:
+        """Fuse dense + sparse rankings with RRF.
+
+        Returns the fused ordered id list plus per-id semantic and normalized
+        lexical score maps for downstream multi-signal scoring.
+        """
+        semantic_map = {mid: s for mid, s in semantic_hits}
+        lexical_map = normalize_scores(lexical_hits)
+
+        if not lexical_hits:
+            return [mid for mid, _ in semantic_hits], semantic_map, lexical_map
+
+        fused = reciprocal_rank_fusion(
+            [
+                [mid for mid, _ in semantic_hits],
+                [mid for mid, _ in lexical_hits],
+            ],
+            k=settings.rrf_k,
+        )
+        fused_ids = [mid for mid, _ in fused]
+        return fused_ids, semantic_map, lexical_map
+
+    async def _enrich_candidates(
+        self,
+        fused_ids: list[str],
+        semantic_map: dict[str, float],
+        lexical_map: dict[str, float],
         query: RetrievalQuery,
     ) -> list[RetrievalCandidate]:
         """Load full memory records from DB, compute multi-signal scores."""
         candidates = []
-        for memory_id, semantic_score in semantic_hits:
+        for memory_id in fused_ids:
             try:
                 memory = await self._db.get_memory(memory_id)
                 candidate = score_memory_for_retrieval(
-                    memory, semantic_score, query_text=query.query_text,
+                    memory,
+                    semantic_map.get(memory_id, 0.0),
+                    query_text=query.query_text,
+                    lexical_score=lexical_map.get(memory_id, 0.0),
                 )
                 candidates.append(candidate)
             except Exception as e:
                 logger.debug(f"Could not enrich memory {memory_id}: {e}")
 
-        # Fallback: if semantic search returned nothing, query DB directly.
+        # Fallback: if both retrieval arms returned nothing, query DB directly.
         if not candidates:
             memories = await self._db.list_memories(
                 user_id=query.user_id,

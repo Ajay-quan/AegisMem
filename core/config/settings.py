@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
 
+    # Storage backend selection. "memory" is the zero-infra default so the
+    # full FastAPI service boots with no external database; "postgres" opts
+    # into the production store.
+    relational_store: Literal["memory", "postgres"] = "memory"
+    data_dir: str = "./data/aegismem"
+
     # PostgreSQL
     postgres_host: str = "localhost"
     postgres_port: int = 5432
@@ -60,8 +66,10 @@ class Settings(BaseSettings):
 
     # Embedding
     embedding_model: str = "BAAI/bge-large-en-v1.5"
-    embedding_backend: Literal["sentence_transformers", "openai", "voyage"] = (
-        "sentence_transformers"
+    # "mock" is a deterministic, dependency-free backend used by the zero-infra
+    # default and the test suite.
+    embedding_backend: Literal["mock", "sentence_transformers", "openai", "voyage"] = (
+        "mock"
     )
     embedding_dimension: int = 1024
 
@@ -79,10 +87,22 @@ class Settings(BaseSettings):
     retrieval_top_n_candidates: int = 30
     retrieval_top_k: int = 5
 
-    # Ranking weights (must sum to ~1.0 for interpretability)
-    weight_semantic: float = 0.40
-    weight_recency: float = 0.25
-    weight_importance: float = 0.25
+    # Hybrid retrieval (dense semantic + sparse lexical fused with RRF)
+    hybrid_retrieval_enabled: bool = True
+    lexical_candidate_pool: int = 200   # max memories pulled into the BM25 corpus
+    rrf_k: int = 60                     # Reciprocal Rank Fusion constant
+    bm25_k1: float = 1.5                # BM25 term-frequency saturation
+    bm25_b: float = 0.75                # BM25 length normalization
+
+    # Reranking
+    reranker_type: Literal["heuristic", "cross_encoder"] = "heuristic"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Ranking weights (kept ~1.0 in aggregate for interpretability)
+    weight_semantic: float = 0.35
+    weight_lexical: float = 0.15
+    weight_recency: float = 0.20
+    weight_importance: float = 0.20
     weight_access: float = 0.10
 
     # Penalties

@@ -1,10 +1,45 @@
 # AegisMem
 
-**LLM Agent Memory System | Python, LangChain, Flask, AWS, Vector DB, REST API**
+**Persistent memory for long-running LLM agents** — hybrid retrieval, versioned lifecycle, contradiction detection, and an MCP server, built on a clean layered architecture (API → services → domain → adapters).
 
-AegisMem is a memory system for long-running LLM agents. It supports ingestion, semantic retrieval, exact hash-key lookup, update, deletion, and graph traversal over related memories.
+AegisMem stores agent observations and retrieves the right context later by combining **dense semantic search**, **sparse BM25 lexical search** (fused with Reciprocal Rank Fusion), recency/importance signals, and a second-stage reranker. It supports the full memory lifecycle: ingest, retrieve, update with version history, soft-delete, exact key lookup, and related-memory graph traversal.
 
-AegisMem is designed with a microservices-style architecture; deployed as a single-node Free Tier instance for demonstration.
+## Two ways to run
+
+AegisMem ships as one codebase with two entry points, and the docs say exactly what each needs:
+
+| | **FastAPI service** (primary product) | **Flask demo** (single-file, AWS Free Tier) |
+| --- | --- | --- |
+| Run | `pip install -r requirements.txt` then `uvicorn apps.api.main:app` | `pip install -r requirements-flask-demo.txt` then `flask --app apps.flask_app run` |
+| Infra needed | **None** — in-memory stores + mock embeddings by default | None — local FAISS + JSON |
+| Scales to | Postgres + Qdrant + Neo4j + Redis via extras / docker-compose | Single node by design |
+| Code | `apps/api/`, `services/`, `domain/`, `adapters/` | `apps/flask_app.py`, `services/flask_memory_service.py` |
+
+The FastAPI service **boots end-to-end with zero external infrastructure** (in-memory relational, vector, and graph stores; deterministic mock embeddings) and swaps in production backends purely through configuration — nothing in the default path requires a database, queue, or vector service.
+
+```bash
+pip install -r requirements.txt
+uvicorn apps.api.main:app --reload          # http://127.0.0.1:8000/docs
+# optional production backends:
+pip install -e ".[postgres,qdrant,neo4j,embeddings,llm,observability,mcp]"
+```
+
+### Hybrid retrieval
+
+Retrieval (`services/retrieve_service.py`, `domain/memory/`) runs a five-stage pipeline: (1) dense semantic search over-retrieves a candidate pool; (2) BM25 sparse search (`domain/memory/lexical.py`) covers rare tokens, names, and identifiers that dense search misses; (3) the two rankings are fused with **Reciprocal Rank Fusion**; (4) candidates are scored on semantic + lexical + recency + importance + access signals; (5) a reranker (heuristic by default, optional cross-encoder via `RERANKER_TYPE=cross_encoder`) applies diversity filtering and returns the top-k.
+
+### MCP server (agent-native)
+
+`integrations/mcp_server.py` exposes AegisMem to any Model Context Protocol client (Claude Desktop, Cursor, custom agents) as four tools — `remember`, `recall`, `forget`, `list_memories` — backed by the same services and the zero-infra store:
+
+```bash
+pip install -e ".[mcp]"
+python -m integrations.mcp_server
+```
+
+### Observability
+
+The FastAPI app exports Prometheus metrics at `/metrics` (request counts/latency, retrieval latency by mode, memories ingested) and emits structured JSON logs with request IDs. `infra/compose/docker-compose.yml` includes Prometheus + Grafana under the `observability` profile.
 
 ## Architecture
 
@@ -112,7 +147,7 @@ The repo now includes the zero-cost polish items that make the project easier to
 - Memory version history on update/delete: `/api/v1/memories/{memory_id}/versions`.
 - Optional local persistent ChromaDB adapter via `AEGISMEM_VECTOR_STORE=chroma`; FAISS remains the default.
 - Advisory file locking and atomic JSON persistence for safer single-node multi-worker writes.
-- Built-in browser demo UI at `/`, plus `scripts/demo_flask_lifecycle.sh` for curl-based demos.
+- Polished product landing page at `/`, built-in browser demo UI at `/demo`, plus `scripts/demo_flask_lifecycle.sh` for curl-based demos.
 - Focused Flask and local component tests: `tests/api/test_flask_api.py`, `tests/unit/test_local_memory_components.py`.
 - GitHub Actions CI: `.github/workflows/ci.yml`.
 - Synthetic retrieval benchmark with 10 target memories plus 60 noisy distractors: `scripts/evaluate_memory_retrieval.py`.
@@ -307,15 +342,22 @@ Looks free but can cost money: unattached Elastic IPs, NAT Gateway, load balance
 
 ## GitHub About Topics
 
-Set: `python`, `flask`, `langchain`, `aws`, `faiss`, `chromadb`, `vector-database`, `rest-api`, `llm`, `memory`.
+Set: `python`, `fastapi`, `llm`, `agents`, `memory`, `mcp`, `vector-database`, `hybrid-search`, `bm25`, `rag`, `reranking`, `qdrant`, `postgres`, `flask`, `aws`.
 
-## Resume Defensibility
+## What maps to what (code pointers)
 
-- `Python, LangChain, Flask, AWS, Vector DB, REST API`: `apps/flask_app.py`, `adapters/embeddings/langchain_adapter.py`, `adapters/vector_store/faiss_store.py`, and the AWS EC2 runbook above.
-- `scalable, distributed memory system`: the code is split by API, service, storage, vector, graph, and indexing boundaries; the README states the Free Tier deployment is single-node for demonstration.
-- `FAISS/ChromaDB`: FAISS is wired in code; ChromaDB is pinned for future local persistent mode but no managed Chroma service is required.
-- `semantic retrieval pipelines`: `FlaskMemoryService.ingest` and `FlaskMemoryService.retrieve` implement embedding, vector storage, similarity search, and return hydration.
-- `microservices-style Flask REST API`: `apps/flask_app.py` exposes lifecycle endpoints over separated services/adapters.
-- `graph-based and hash-indexed retrieval`: `LocalMemoryGraph.traverse` and `JsonMemoryStore.get_by_key`.
-- `priority queues, hash maps, trees`: `HotMemoryIndex`.
-- `deployable on AWS`: the Dockerfile and EC2 Free Tier runbook deploy the container on one instance with local EBS persistence.
+- **Hybrid retrieval (dense + BM25 + RRF)**: `domain/memory/lexical.py` (BM25, Reciprocal Rank Fusion), fused and scored in `services/retrieve_service.py` and `domain/memory/scoring.py`.
+- **Reranking**: `domain/memory/reranker.py` — heuristic + diversity filtering by default, optional lazy-loaded cross-encoder with fallback.
+- **Layered architecture with pluggable backends**: `apps/api/` (FastAPI), `services/`, `domain/`, `adapters/` (relational: in-memory/Postgres; vector: in-memory/Qdrant; graph: in-memory/Neo4j).
+- **Runs with zero infrastructure**: `adapters/relational_store/memory_store.py` + in-memory vector/graph + mock embeddings; production backends are config-selected in `apps/api/dependencies.py`.
+- **MCP server**: `integrations/mcp_server.py` (`remember`/`recall`/`forget`/`list_memories`).
+- **Observability**: Prometheus `/metrics` (`core/observability/metrics.py`) and structured JSON logging (`core/logging/logger.py`).
+- **Lifecycle, versioning, contradiction, reflection**: `services/update_service.py`, `services/contradiction_service.py`, `services/reflect_service.py`, `services/consolidation_service.py`.
+- **Graph + hash-indexed retrieval**: `LocalMemoryGraph.traverse` and `JsonMemoryStore.get_by_key`; hot cache `HotMemoryIndex` (priority queue + hash map + recency tree).
+- **Deployment**: zero-infra FastAPI (`requirements.txt`), full stack (`infra/compose/docker-compose.yml`), and the single-node Flask demo on AWS Free Tier (runbook above, `requirements-flask-demo.txt`).
+
+## Reach me
+
+**Ajay Varada** — [ajayvrda@gmail.com](mailto:ajayvrda@gmail.com) · [@Ajay-quan](https://github.com/Ajay-quan)
+
+Questions, bugs, or feature ideas: open an issue or PR on the repo. Full contact details are in [`CONTACT.md`](CONTACT.md).

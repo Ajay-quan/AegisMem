@@ -5,7 +5,15 @@ import uuid
 from contextvars import ContextVar
 from typing import Any
 
-from pythonjsonlogger import jsonlogger
+# python-json-logger gives structured JSON logs in production but is optional;
+# fall back to a plain formatter so the service still runs with minimal deps.
+try:
+    from pythonjsonlogger import jsonlogger
+
+    _JSON_LOGGING = True
+except Exception:  # pragma: no cover - dependency guard
+    jsonlogger = None
+    _JSON_LOGGING = False
 
 # Context variables for trace propagation
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -14,32 +22,44 @@ agent_id_var: ContextVar[str] = ContextVar("agent_id", default="")
 user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 
 
-class AegisJsonFormatter(jsonlogger.JsonFormatter):
-    """Custom JSON formatter that injects trace context."""
+if _JSON_LOGGING:
 
-    def add_fields(
-        self,
-        log_record: dict[str, Any],
-        record: logging.LogRecord,
-        message_dict: dict[str, Any],
-    ) -> None:
-        super().add_fields(log_record, record, message_dict)
-        log_record["service"] = "aegismem"
-        log_record["request_id"] = request_id_var.get() or str(uuid.uuid4())
-        log_record["session_id"] = session_id_var.get()
-        log_record["agent_id"] = agent_id_var.get()
-        log_record["user_id"] = user_id_var.get()
-        log_record["level"] = record.levelname
-        log_record["logger"] = record.name
+    class AegisJsonFormatter(jsonlogger.JsonFormatter):
+        """Custom JSON formatter that injects trace context."""
+
+        def add_fields(
+            self,
+            log_record: dict[str, Any],
+            record: logging.LogRecord,
+            message_dict: dict[str, Any],
+        ) -> None:
+            super().add_fields(log_record, record, message_dict)
+            log_record["service"] = "aegismem"
+            log_record["request_id"] = request_id_var.get() or str(uuid.uuid4())
+            log_record["session_id"] = session_id_var.get()
+            log_record["agent_id"] = agent_id_var.get()
+            log_record["user_id"] = user_id_var.get()
+            log_record["level"] = record.levelname
+            log_record["logger"] = record.name
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """Configure structured JSON logging for the application."""
+    """Configure structured logging for the application.
+
+    Uses JSON output when ``python-json-logger`` is available, otherwise a
+    plain text formatter so the zero-infra path has no hard dependency.
+    """
     handler = logging.StreamHandler(sys.stdout)
-    formatter = AegisJsonFormatter(
-        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+    if _JSON_LOGGING:
+        formatter: logging.Formatter = AegisJsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+    else:
+        formatter = logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
     handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()

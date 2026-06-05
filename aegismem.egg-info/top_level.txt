@@ -1,6 +1,0 @@
-adapters
-apps
-core
-domain
-infra
-services

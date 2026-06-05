@@ -1,0 +1,16 @@
+# Dependencies for the self-contained Flask demo (apps/flask_app.py) with local
+# FAISS persistence and the browser demo UI. The Docker image and the AWS Free
+# Tier runbook use this set. The primary product (FastAPI) uses requirements.txt.
+
+Flask==3.0.3
+gunicorn==22.0.0
+langchain-core==0.2.43
+faiss-cpu==1.8.0.post1
+chromadb==0.5.23
+sentence-transformers==3.0.1
+numpy==1.26.4
+pydantic==2.8.2
+pydantic-settings==2.4.0
+python-dotenv==1.0.1
+transformers==4.44.2
+tokenizers==0.19.1

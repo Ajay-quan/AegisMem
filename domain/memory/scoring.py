@@ -81,15 +81,21 @@ def compute_composite_score(
     recency_score: float,
     importance_score: float,
     access_count: int = 0,
+    lexical_score: float = 0.0,
     contradiction_penalty: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> float:
     """Hybrid retrieval composite score combining multiple signals.
 
-    Default weights come from ``settings`` but can be overridden per call.
+    Signals: dense ``semantic`` similarity, sparse ``lexical`` (BM25) overlap,
+    ``recency`` (exponential decay), ``importance``, and access frequency.
+    Default weights come from ``settings`` but can be overridden per call. When
+    no lexical signal is supplied (e.g. dense-only mode) its weight is folded
+    back into the semantic term so the composite still spans [0, 1].
     """
     w = weights or {
         "semantic": settings.weight_semantic,
+        "lexical": settings.weight_lexical,
         "recency": settings.weight_recency,
         "importance": settings.weight_importance,
         "access": settings.weight_access,
@@ -97,14 +103,25 @@ def compute_composite_score(
 
     access_score = math.log1p(access_count) / math.log1p(100)  # normalize
 
+    w_semantic = w.get("semantic", 0.35)
+    # Default to 0.0 so explicit weight dicts that omit 'lexical' are honored;
+    # the settings-derived default dict supplies the real lexical weight.
+    w_lexical = w.get("lexical", 0.0)
+    # Dense-only callers pass lexical_score=0; redistribute its weight so the
+    # composite is not silently capped below 1.0.
+    if lexical_score <= 0.0:
+        w_semantic += w_lexical
+        w_lexical = 0.0
+
     score = (
-        w.get("semantic", 0.40) * semantic_score
-        + w.get("recency", 0.25) * recency_score
-        + w.get("importance", 0.25) * importance_score
+        w_semantic * semantic_score
+        + w_lexical * lexical_score
+        + w.get("recency", 0.20) * recency_score
+        + w.get("importance", 0.20) * importance_score
         + w.get("access", 0.10) * access_score
     )
 
-    # Apply contradiction penalty 
+    # Apply contradiction penalty
     if contradiction_penalty > 0:
         score -= contradiction_penalty
 
@@ -142,6 +159,7 @@ def score_memory_for_retrieval(
     memory: MemoryItem,
     semantic_score: float,
     query_text: str = "",
+    lexical_score: float = 0.0,
 ) -> RetrievalCandidate:
     """Compute all signals and return a fully-scored RetrievalCandidate.
 
@@ -153,7 +171,17 @@ def score_memory_for_retrieval(
         Dense similarity returned by the vector store.
     query_text : str
         The original query string — needed for lexical scoring.
+    lexical_score : float
+        Normalized BM25 overlap (0..1) from the sparse retrieval stage. Left at
+        0.0 in dense-only mode, in which case its weight is folded into
+        semantic by :func:`compute_composite_score`.
     """
+    # Cosine similarity lives in [-1, 1] and embedding backends can return
+    # negative or slightly-out-of-range values; clamp to [0, 1] so the signal
+    # is well-defined and candidates are never silently dropped by validation.
+    semantic_score = max(0.0, min(1.0, semantic_score))
+    lexical_score = max(0.0, min(1.0, lexical_score))
+
     recency = compute_recency_score(memory)
     importance = memory.importance_score
 
@@ -169,6 +197,7 @@ def score_memory_for_retrieval(
         recency_score=recency,
         importance_score=importance,
         access_count=memory.access_count,
+        lexical_score=lexical_score,
         contradiction_penalty=contradiction_penalty,
     )
 
@@ -181,5 +210,6 @@ def score_memory_for_retrieval(
         semantic_score=semantic_score,
         recency_score=recency,
         importance_score=importance,
+        lexical_score=lexical_score,
         composite_score=composite,
     )

@@ -11,9 +11,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# This image runs the self-contained Flask demo, so it uses the Flask deps set.
+COPY requirements-flask-demo.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements-flask-demo.txt
 
 COPY . .
 

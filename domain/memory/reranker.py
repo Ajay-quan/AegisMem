@@ -103,14 +103,41 @@ class HeuristicReranker(BaseReranker):
 
 
 class CrossEncoderReranker(BaseReranker):
-    """Stub for future cross-encoder reranking (e.g. ms-marco-MiniLM).
+    """Cross-encoder reranker (e.g. ms-marco-MiniLM).
 
-    Not implemented — exists as an architecture hook for when heavier
-    reranking is justified by the deployment context.
+    A cross-encoder jointly encodes (query, document) and is materially more
+    accurate than the bi-encoder cosine similarity used at first-stage
+    retrieval — at the cost of running the model once per candidate. It is
+    therefore applied only to the small post-fusion candidate set.
+
+    The ``sentence-transformers`` model is loaded lazily on first use and
+    cached. If the dependency or model is unavailable, the reranker degrades
+    gracefully to :class:`HeuristicReranker` instead of failing the request.
     """
 
-    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> None:
+    def __init__(
+        self,
+        model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        diversity_threshold: float = 0.92,
+    ) -> None:
         self._model_name = model_name
+        self._model = None
+        self._unavailable = False
+        self._fallback = HeuristicReranker(diversity_threshold=diversity_threshold)
+
+    def _load_model(self) -> None:
+        if self._model is not None or self._unavailable:
+            return
+        try:
+            from sentence_transformers import CrossEncoder  # type: ignore
+
+            self._model = CrossEncoder(self._model_name)
+            logger.info(f"Loaded cross-encoder reranker: {self._model_name}")
+        except Exception as e:  # ImportError or model download failure
+            self._unavailable = True
+            logger.warning(
+                f"Cross-encoder unavailable ({e}); falling back to heuristic reranker."
+            )
 
     def rerank(
         self,
@@ -118,7 +145,47 @@ class CrossEncoderReranker(BaseReranker):
         query_text: str,
         top_k: int,
     ) -> list[RetrievalCandidate]:
-        raise NotImplementedError(
-            "CrossEncoderReranker is a placeholder. Install sentence-transformers "
-            "and implement cross-encoder scoring to use this."
+        if not candidates:
+            return []
+
+        self._load_model()
+        if self._model is None:
+            return self._fallback.rerank(candidates, query_text, top_k)
+
+        # Diversity-filter first so we only pay for cross-encoding distinct docs.
+        deduped = self._fallback._diversity_filter(
+            sorted(candidates, key=lambda c: c.composite_score, reverse=True)
         )
+        pairs = [(query_text, c.memory.content) for c in deduped]
+        try:
+            scores = self._model.predict(pairs)
+        except Exception as e:
+            logger.warning(f"Cross-encoder scoring failed ({e}); using heuristic order.")
+            return self._fallback.rerank(candidates, query_text, top_k)
+
+        score_vals = [float(s) for s in scores]
+        lo, hi = min(score_vals), max(score_vals)
+        for c, s in zip(deduped, score_vals):
+            # Normalize the cross-encoder logit into [0,1] for a comparable score.
+            c.composite_score = (s - lo) / (hi - lo) if hi > lo else 1.0
+        deduped.sort(key=lambda c: c.composite_score, reverse=True)
+        for i, c in enumerate(deduped):
+            c.rank = i + 1
+        return deduped[:top_k]
+
+
+def build_reranker(settings) -> BaseReranker:
+    """Construct the reranker selected by configuration.
+
+    ``reranker_type='cross_encoder'`` returns a lazily-loaded cross-encoder
+    (with heuristic fallback); anything else returns the heuristic reranker.
+    """
+    if getattr(settings, "reranker_type", "heuristic") == "cross_encoder":
+        return CrossEncoderReranker(
+            model_name=getattr(
+                settings, "cross_encoder_model",
+                "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            ),
+            diversity_threshold=settings.diversity_threshold,
+        )
+    return HeuristicReranker(diversity_threshold=settings.diversity_threshold)
