@@ -1,8 +1,10 @@
-# AegisMem
+# stateful.ai
 
-**Persistent memory for long-running LLM agents** - hybrid retrieval, versioned lifecycle, contradiction detection, reflection, and an MCP server, built on a clean layered architecture: API -> services -> domain -> adapters.
+**Self-improving persistent memory for long-running LLM agents** — hybrid retrieval, versioned lifecycle, contradiction detection, reflection, **continual learning from feedback**, PII redaction, and an MCP server, built on a clean layered architecture: API → services → domain → adapters.
 
-AegisMem gives agents a durable memory layer that can store observations, retrieve the right context later, update stale facts, detect contradictions, and expose memory directly to MCP-capable tools. The primary product is a zero-infra FastAPI service that runs locally with in-memory stores and deterministic mock embeddings, then scales by swapping adapters for Postgres, Qdrant, Neo4j, real embedding models, and LLM providers.
+stateful.ai gives agents a durable memory layer that can store observations, retrieve the right context later, update stale facts, detect contradictions, **learn online which memories are actually useful**, and expose memory directly to MCP-capable tools. The primary product is a zero-infra FastAPI service that runs locally with in-memory stores and deterministic mock embeddings, then scales by swapping adapters for Postgres, Qdrant, Neo4j, real embedding models, and LLM providers.
+
+> **What makes it different:** the memory corpus is reused as a continual-learning replay buffer, so retrieval ranking improves with use **without catastrophic forgetting** (EWC-anchored, per-tenant) — a capability no mainstream OSS memory layer ships as a complete, eval-gated stack.
 
 ## Why this exists
 
@@ -13,9 +15,47 @@ Long-running agents need more than chat history. They need memory that can answe
 - "Which memories are still important, recent, or repeatedly useful?"
 - "Can an agent recall this context from another app through MCP?"
 
-AegisMem answers those with hybrid retrieval: dense semantic search for meaning, BM25 lexical search for names and identifiers, Reciprocal Rank Fusion to merge both rankings, recency/importance/access scoring, and a second-stage reranker.
+stateful.ai answers those with hybrid retrieval: dense semantic search for meaning, BM25 lexical search for names and identifiers, Reciprocal Rank Fusion to merge both rankings, recency/importance/access scoring, and a second-stage reranker.
+
+## How it compares
+
+| | stateful.ai | Mem0 | Zep / Graphiti | Letta / MemGPT | A-MEM |
+|---|---|---|---|---|---|
+| Hybrid retrieval (dense + BM25 + RRF) | ✅ | partial | ✅ (graph) | — | — |
+| Reranking | ✅ heuristic / cross-encoder | — | — | — | — |
+| Versioned lifecycle + contradiction detection | ✅ | partial | ✅ temporal | — | — |
+| **Online learning from feedback** | ✅ EWC, per-tenant | — | — | — | — |
+| **Anti-forgetting eval (BWT/FWT)** | ✅ promotion gate | — | — | — | — |
+| Sleep-time consolidation | roadmap | — | — | ✅ | partial |
+| PII redaction at ingest | ✅ | — | — | — | — |
+| MCP server | ✅ | partial | partial | ✅ | — |
+| Zero-infra default | ✅ | — | — | — | ✅ |
+| Zero-dep SDK + CLI | ✅ | ✅ | ✅ | ✅ | — |
+
+This is a capability map of stateful.ai's design, not a head-to-head benchmark —
+real-corpus comparison (LoCoMo / LongMemEval) is on the roadmap in
+`docs/ELITE_UPGRADE.md`.
 
 ## What changed recently
+
+**v0.3.0 — Stateful-CL: continual learning, telemetry, privacy, SDK/CLI**
+
+- Added a **continual-learning loop**: an online, per-namespace, EWC-anchored ranking policy that adapts to feedback, a replay buffer, a `POST /feedback` endpoint, and `GET /learning/stats`. Off by default (`CONTINUAL_LEARNING_ENABLED`).
+- Added a **continual-eval harness** (`scripts/continual_eval.py`) reporting Backward/Forward Transfer; EWC turns BWT ≈ −0.64 (catastrophic forgetting) into ≈ +0.20 while beating the static baseline, and acts as a promotion gate.
+- Added **telemetry** for the learning loop (feedback/reward/policy/replay Prometheus series) plus retrieval-result metrics.
+- Added **PII redaction at ingest** (`domain/privacy/`, email/phone/card-with-Luhn/SSN/IP/secret), config-gated via `PII_REDACTION_ENABLED`.
+- Added a **zero-dependency Python SDK** (`sdk/`) and **CLI** (`apps/cli.py`).
+- Test suite: **135 passing**. Design & roadmap: `docs/continual_learning_design.md`, `docs/ELITE_UPGRADE.md`.
+
+**v0.2.0 — production hardening & glass console**
+
+- Added **API-key auth** (`STATEFUL_AI_API_KEY`, constant-time compare), **per-client rate limiting** (token bucket, `429` + `Retry-After`), **request size limits** (`413`), and **security headers** on both services.
+- Added a **consistent error envelope** (`{"error": {code, message, request_id}}`) across HTTP, validation, and unhandled errors.
+- Added **`GET /api/v1/stats`** (counts by type/status, importance, access, contradictions) and a **`/health/ready` readiness probe** that checks the stores.
+- Rebuilt the product UI as a **glassmorphism landing page (`/`) and live operations console (`/demo`)**: KPI cards, ingest, ranked semantic recall, version history, soft-delete, JSON export.
+- Added a **security test suite** (auth, rate limiting, size limits, headers, stats).
+
+**v0.1.0**
 
 - Added **hybrid retrieval**: dense vector search + BM25 + Reciprocal Rank Fusion.
 - Added a **lazy cross-encoder reranker** with heuristic fallback.
@@ -40,8 +80,8 @@ Use the **FastAPI service** for the main product architecture. Use the **Flask d
 ## Quickstart: FastAPI
 
 ```bash
-git clone https://github.com/Ajay-quan/AegisMem.git
-cd AegisMem
+git clone https://github.com/Ajay-quan/stateful.ai.git
+cd stateful.ai
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -103,14 +143,24 @@ pip install -e ".[postgres,qdrant,neo4j,embeddings,llm,observability,mcp]"
 Useful environment variables:
 
 ```bash
-RELATIONAL_STORE=postgres
-EMBEDDING_BACKEND=sentence_transformers
-RERANKER_TYPE=cross_encoder
-DEFAULT_LLM_PROVIDER=openai
+APP_ENV=production            # makes configured stores STRICT (see below)
+RELATIONAL_STORE=postgres     # memory | postgres
+VECTOR_STORE=qdrant           # memory | qdrant
+GRAPH_STORE=neo4j             # memory | neo4j
+EMBEDDING_BACKEND=openai      # mock | sentence_transformers | openai
 OPENAI_API_KEY=...
+RERANKER_TYPE=cross_encoder
 ```
 
-The default `.env.example` keeps `RELATIONAL_STORE=memory` and `EMBEDDING_BACKEND=mock` so a clean checkout stays dependency-light.
+The default `.env.example` keeps everything on `memory` + `mock` so a clean
+checkout stays dependency-light.
+
+**Production safety:** when `APP_ENV=production`, a configured external store
+(Postgres/Qdrant/Neo4j) that is unreachable causes startup/readiness to **fail
+loudly** rather than silently falling back to the non-durable in-memory store.
+In development/staging it falls back with a warning. Embedding backends are now
+fully aligned with the code: `mock`, `sentence_transformers`, and `openai` (the
+previously-advertised `voyage` option has been removed).
 
 ## Architecture
 
@@ -168,16 +218,115 @@ pip install -e ".[mcp]"
 python -m integrations.mcp_server
 ```
 
-`integrations/mcp_server.py` exposes AegisMem to Claude Desktop, Cursor, and custom MCP clients through:
+`integrations/mcp_server.py` exposes stateful.ai to Claude Desktop, Cursor, and custom MCP clients through:
 
 - `remember`
 - `recall`
 - `forget`
 - `list_memories`
 
+## Continual learning (Stateful-CL)
+
+stateful.ai can *learn from use*. The memory corpus already is a versioned, scored,
+deduplicated replay buffer — exactly what continual learning needs — so ranking
+quality improves online from feedback instead of staying static. It is **off by
+default** (`CONTINUAL_LEARNING_ENABLED=false`), preserving the zero-infra path.
+
+When enabled:
+
+- `/api/v1/retrieve` returns a `query_id` and logs the served candidates (with
+  their signal features) to a bounded replay buffer.
+- `/api/v1/feedback` reports whether a retrieved memory was useful; the reward is
+  shaped (explicit grade + outcome + stale-memory penalty) and applied to a
+  **per-namespace** learned ranking policy.
+- The policy is a convex (simplex) weight vector over the five retrieval signals,
+  updated online with an **EWC-style anchor** (`consolidate()` snapshots weights
+  at task boundaries) so new learning does not erase old — and per-namespace
+  isolation personalizes each tenant with zero cross-talk.
+- `/api/v1/learning/stats` inspects the replay buffer and policy state.
+
+```bash
+export CONTINUAL_LEARNING_ENABLED=true
+# retrieve -> note query_id and a memory_id, then:
+curl -s -X POST "$BASE/api/v1/feedback" -H "Content-Type: application/json" \
+  -d '{"query_id":"<qid>","memory_id":"<mid>","useful":true,"outcome":"success"}'
+```
+
+Evidence it works without catastrophic forgetting — the task-incremental harness
+reports Backward/Forward Transfer and gates promotion:
+
+```bash
+python scripts/continual_eval.py --out docs/benchmarks
+# EWC turns BWT from ~-0.64 (catastrophic forgetting) into ~+0.20, beating the
+# static baseline on average P@1. See docs/benchmarks/continual_eval.md.
+```
+
+Design and roadmap: `docs/continual_learning_design.md`. Code: `domain/learning/`,
+`services/feedback_service.py`.
+
+## Python SDK & CLI
+
+A dependency-free client (stdlib only) covers the full lifecycle including the
+feedback loop:
+
+```python
+from sdk import StatefulClient
+
+mem = StatefulClient("http://localhost:8000")          # optional api_key=...
+mem.ingest("Alice prefers Python and FAISS.", user_id="alice", memory_type="fact")
+
+hits = mem.retrieve("what does alice like?", user_id="alice")
+context = mem.context_for("what does alice like?", user_id="alice")  # ready to inject
+
+# close the continual-learning loop
+mem.feedback(hits["query_id"], hits["results"][0]["memory_id"], useful=True, outcome="success")
+```
+
+Same surface from the terminal:
+
+```bash
+python -m apps.cli ingest "Alice prefers Python and FAISS." --user alice --type fact
+python -m apps.cli recall "what does alice like?" --user alice
+python -m apps.cli feedback <query_id> <memory_id> --useful
+python -m apps.cli stats --user alice
+```
+
+## Privacy: PII redaction at ingest
+
+Memory systems persist what they observe, so stateful.ai can scrub PII **at the
+ingest boundary** — before anything is embedded, stored, or retrievable. Enable
+with `PII_REDACTION_ENABLED=true`. It detects and replaces emails, phone
+numbers, credit-card numbers (Luhn-validated to avoid false positives), SSNs,
+IPv4 addresses, and provider secrets/tokens with typed placeholders
+(`[REDACTED_EMAIL]`), and records per-category counts on the memory's metadata.
+Pure stdlib, deterministic, auditable. Code: `domain/privacy/redaction.py`.
+
+## Security & multi-tenancy
+
+Beyond the single `STATEFUL_AI_API_KEY`, you can issue **named, revocable, scoped
+keys** via `STATEFUL_AI_API_KEYS` (`name:secret[:tenant]`, comma/newline
+separated). Each request is attributed to its principal, and every **mutating**
+operation is written to an **audit log** exposed at `GET /api/v1/audit`
+(principal, tenant, method, path, status, timestamp). Combined with the existing
+constant-time auth, token-bucket rate limiting, request-size limits, and
+security headers, this gives a per-consumer accountability trail.
+Code: `core/security/`.
+
+## Evaluation & benchmarks
+
+Two complementary harnesses:
+
+- **Retrieval quality (IR metrics):** `scripts/benchmark_memory.py` runs a
+  dataset of users + gold-labeled queries through the real ingest/retrieval
+  stack and reports **recall@k, MRR, nDCG@k**, with a **dense-only vs hybrid**
+  ablation. A LoCoMo-style sample is bundled (`docs/benchmarks/sample_dataset.json`);
+  swap in real LoCoMo/LongMemEval via the same schema.
+- **Continual learning:** `scripts/continual_eval.py` reports Backward/Forward
+  Transfer to prove the online policy improves without catastrophic forgetting.
+
 ## Observability
 
-The FastAPI app exports Prometheus metrics at `/metrics` and emits structured JSON logs with request IDs. Metrics include HTTP request counts/latency, retrieval latency by mode, and memories ingested. `infra/compose/docker-compose.yml` includes Prometheus + Grafana under the `observability` profile.
+The FastAPI app exports Prometheus metrics at `/metrics` and emits structured JSON logs with request IDs. Metrics include HTTP request counts/latency, retrieval latency by mode, memories ingested, retrieval result/candidate counts, and the full Stateful-CL learning loop: feedback submissions by outcome, shaped-reward distribution, online policy updates, and replay-buffer/policy gauges (`stateful_ai_feedback_total`, `stateful_ai_feedback_reward`, `stateful_ai_cl_policy_updates_total`, `stateful_ai_cl_replay_interactions`, `stateful_ai_cl_replay_labeled_examples`, `stateful_ai_cl_policy_namespaces`). `infra/compose/docker-compose.yml` includes Prometheus + Grafana under the `observability` profile.
 
 ## Flask demo and Docker
 
@@ -185,18 +334,18 @@ The Flask app is the single-node demo path. It uses local FAISS + JSON persisten
 
 ```bash
 pip install -r requirements-flask-demo.txt
-AEGISMEM_DATA_DIR=$PWD/data AEGISMEM_EMBEDDING_BACKEND=mock \
+STATEFUL_AI_DATA_DIR=$PWD/data STATEFUL_AI_EMBEDDING_BACKEND=mock \
   flask --app apps.flask_app run --host 0.0.0.0 --port 8000
 ```
 
 Docker runs the Flask demo by default:
 
 ```bash
-docker build -t aegismem:free-tier .
+docker build -t stateful_ai:free-tier .
 docker run --rm -p 8000:8000 \
-  -e AEGISMEM_DATA_DIR=/data/aegismem \
-  -v "$PWD/data:/data/aegismem" \
-  aegismem:free-tier
+  -e STATEFUL_AI_DATA_DIR=/data/stateful_ai \
+  -v "$PWD/data:/data/stateful_ai" \
+  stateful_ai:free-tier
 ```
 
 ### Flask demo examples
@@ -234,16 +383,16 @@ Expected response shapes:
 
 ## Project capabilities
 
-- Optional Flask API-key auth with `AEGISMEM_API_KEY` and `X-API-Key`.
+- Optional Flask API-key auth with `STATEFUL_AI_API_KEY` and `X-API-Key`.
 - Flask import/export endpoints for portable memory snapshots: `/api/v1/export` and `/api/v1/import`.
 - Flask memory version history on update/delete: `/api/v1/memories/{memory_id}/versions`.
-- Optional local persistent ChromaDB adapter in the Flask demo via `AEGISMEM_VECTOR_STORE=chroma`; FAISS remains the default.
+- Optional local persistent ChromaDB adapter in the Flask demo via `STATEFUL_AI_VECTOR_STORE=chroma`; FAISS remains the default.
 - Advisory file locking and atomic JSON persistence for safer single-node demo writes.
 - Product landing page at `/`, built-in browser demo UI at `/demo`, plus `scripts/demo_flask_lifecycle.sh`.
 - GitHub Actions CI: `.github/workflows/ci.yml`.
 - Synthetic retrieval benchmark with 10 target memories plus 60 noisy distractors: `scripts/evaluate_memory_retrieval.py`.
 - Generated benchmark results and charts under `docs/benchmarks` and `docs/assets`.
-- Architecture paper: `docs/aegismem_architecture.md`.
+- Architecture paper: `docs/stateful_ai_architecture.md`.
 - ADRs: `docs/adr/`.
 - OpenAPI spec: `docs/api/openapi.yaml`.
 - Seeded sample data: `examples/sample_memories.json`.
@@ -275,15 +424,15 @@ Run the lifecycle demo after starting the Flask app:
 
 ```bash
 BASE=http://127.0.0.1:8000 ./scripts/demo_flask_lifecycle.sh
-# If AEGISMEM_API_KEY is set on the server:
+# If STATEFUL_AI_API_KEY is set on the server:
 API_KEY=dev-secret BASE=http://127.0.0.1:8000 ./scripts/demo_flask_lifecycle.sh
 ```
 
 Optional Flask auth and Chroma mode:
 
 ```bash
-export AEGISMEM_API_KEY=dev-secret
-export AEGISMEM_VECTOR_STORE=chroma  # optional; default is faiss
+export STATEFUL_AI_API_KEY=dev-secret
+export STATEFUL_AI_VECTOR_STORE=chroma  # optional; default is faiss
 ```
 
 ## AWS Free Tier Deployment Runbook
@@ -310,7 +459,7 @@ CLI budget example:
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 aws budgets create-budget \
   --account-id "$ACCOUNT_ID" \
-  --budget '{"BudgetName":"aegismem-dollar-alert","BudgetLimit":{"Amount":"1","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' \
+  --budget '{"BudgetName":"stateful_ai-dollar-alert","BudgetLimit":{"Amount":"1","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' \
   --notifications-with-subscribers '[{"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80,"ThresholdType":"PERCENTAGE"},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"YOUR_EMAIL@example.com"}]}]'
 ```
 
@@ -333,8 +482,8 @@ Do not provision ALB, NLB, API Gateway, CloudFront, NAT Gateway, RDS, OpenSearch
 
 ```bash
 REGION=us-east-1
-KEY_NAME=aegismem-free-tier
-SG_NAME=aegismem-free-tier-sg
+KEY_NAME=stateful_ai-free-tier
+SG_NAME=stateful_ai-free-tier-sg
 MY_IP=$(curl -s https://checkip.amazonaws.com)/32
 AMI_ID=ami-REPLACE_WITH_AMAZON_LINUX_2023_OR_UBUNTU_2204
 
@@ -343,7 +492,7 @@ aws ec2 create-key-pair --region "$REGION" --key-name "$KEY_NAME" \
 chmod 400 "$KEY_NAME.pem"
 
 VPC_ID=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)
-SG_ID=$(aws ec2 create-security-group --region "$REGION" --group-name "$SG_NAME" --description "AegisMem Free Tier demo" --vpc-id "$VPC_ID" --query GroupId --output text)
+SG_ID=$(aws ec2 create-security-group --region "$REGION" --group-name "$SG_NAME" --description "stateful.ai Free Tier demo" --vpc-id "$VPC_ID" --query GroupId --output text)
 aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP"
 aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG_ID" --protocol tcp --port 80 --cidr 0.0.0.0/0
 
@@ -367,7 +516,7 @@ echo "$PUBLIC_DNS"
 Amazon Linux 2023:
 
 ```bash
-ssh -i aegismem-free-tier.pem ec2-user@$PUBLIC_DNS
+ssh -i stateful_ai-free-tier.pem ec2-user@$PUBLIC_DNS
 sudo dnf update -y
 sudo dnf install -y docker git
 sudo systemctl enable --now docker
@@ -378,18 +527,18 @@ exit
 Reconnect:
 
 ```bash
-ssh -i aegismem-free-tier.pem ec2-user@$PUBLIC_DNS
-git clone https://github.com/Ajay-quan/AegisMem.git
-cd AegisMem
-mkdir -p /opt/aegismem/data
-sudo chown -R ec2-user:ec2-user /opt/aegismem
-docker build -t aegismem:free-tier .
-docker run -d --name aegismem --restart unless-stopped \
+ssh -i stateful_ai-free-tier.pem ec2-user@$PUBLIC_DNS
+git clone https://github.com/Ajay-quan/stateful.ai.git
+cd stateful.ai
+mkdir -p /opt/stateful_ai/data
+sudo chown -R ec2-user:ec2-user /opt/stateful_ai
+docker build -t stateful_ai:free-tier .
+docker run -d --name stateful_ai --restart unless-stopped \
   -p 80:8000 \
-  -e AEGISMEM_DATA_DIR=/data/aegismem \
-  -e AEGISMEM_EMBEDDING_BACKEND=mock \
-  -v /opt/aegismem/data:/data/aegismem \
-  aegismem:free-tier
+  -e STATEFUL_AI_DATA_DIR=/data/stateful_ai \
+  -e STATEFUL_AI_EMBEDDING_BACKEND=mock \
+  -v /opt/stateful_ai/data:/data/stateful_ai \
+  stateful_ai:free-tier
 ```
 
 Ubuntu 22.04 uses `ubuntu@$PUBLIC_DNS` and `sudo apt-get install -y docker.io git` instead of `dnf`.

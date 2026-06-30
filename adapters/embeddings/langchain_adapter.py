@@ -1,4 +1,4 @@
-"""LangChain integration for AegisMem embeddings."""
+"""LangChain integration for stateful.ai embeddings."""
 from __future__ import annotations
 
 import asyncio
@@ -17,8 +17,8 @@ except Exception:
             raise NotImplementedError
 
 
-class AegisMemEmbeddings(Embeddings):
-    """Expose any AegisMem embedding backend through LangChain Embeddings."""
+class StatefulEmbeddings(Embeddings):
+    """Expose any stateful.ai embedding backend through LangChain Embeddings."""
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
@@ -36,5 +36,5 @@ class AegisMemEmbeddings(Embeddings):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         if loop.is_running():
-            raise RuntimeError("AegisMemEmbeddings sync API cannot run inside an active event loop")
+            raise RuntimeError("StatefulEmbeddings sync API cannot run inside an active event loop")
         return loop.run_until_complete(coroutine)

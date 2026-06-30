@@ -10,7 +10,7 @@ from adapters.vector_store.base import VectorSearchResult
 class ChromaVectorStore:
     """ChromaDB persistent client adapter for single-node local demos."""
 
-    def __init__(self, persist_dir: str | Path, collection_name: str = "aegismem_memories") -> None:
+    def __init__(self, persist_dir: str | Path, collection_name: str = "stateful_ai_memories") -> None:
         self.persist_dir = Path(persist_dir)
         self.collection_name = collection_name
         self._client: Any = None

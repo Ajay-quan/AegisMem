@@ -1,1 +1,1 @@
-"""External integrations for AegisMem (MCP server, framework adapters)."""
+"""External integrations for stateful.ai (MCP server, framework adapters)."""

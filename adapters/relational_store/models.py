@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for AegisMem relational store."""
+"""SQLAlchemy ORM models for stateful.ai relational store."""
 from __future__ import annotations
 
 import uuid

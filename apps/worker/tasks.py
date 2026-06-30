@@ -1,11 +1,11 @@
-"""Celery worker tasks for AegisMem."""
+"""Celery worker tasks for stateful.ai."""
 import asyncio
 from celery import Celery
 
 from core.config.settings import settings
 
 celery_app = Celery(
-    "aegismem_worker",
+    "stateful_ai_worker",
     broker=settings.redis_url,
     backend=settings.redis_url,
 )

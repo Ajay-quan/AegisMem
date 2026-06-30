@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: aegismem-api
+  - job_name: stateful_ai-api
     metrics_path: /metrics
     static_configs:
       - targets: ["api:8000"]

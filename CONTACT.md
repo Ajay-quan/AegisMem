@@ -1,12 +1,12 @@
 # Reach Me
 
-Maintainer of **AegisMem** — persistent, hybrid-retrieval memory for long-running LLM agents.
+Maintainer of **stateful.ai** — persistent, hybrid-retrieval memory for long-running LLM agents.
 
 **Ajay Varada**
 
 - Email: [ajayvrda@gmail.com](mailto:ajayvrda@gmail.com)
 - GitHub: [@Ajay-quan](https://github.com/Ajay-quan)
-- Project: [github.com/Ajay-quan/AegisMem](https://github.com/Ajay-quan/AegisMem)
+- Project: [github.com/Ajay-quan/stateful.ai](https://github.com/Ajay-quan/stateful.ai)
 <!-- Add your other links below as you like:
 - LinkedIn: https://www.linkedin.com/in/<your-handle>
 - Portfolio: https://<your-site>
@@ -14,7 +14,7 @@ Maintainer of **AegisMem** — persistent, hybrid-retrieval memory for long-runn
 
 ## About this project
 
-AegisMem is a memory layer for AI agents: it ingests observations and retrieves
+stateful.ai is a memory layer for AI agents: it ingests observations and retrieves
 the right context later using a hybrid pipeline (dense semantic search + BM25
 lexical search fused with Reciprocal Rank Fusion), a configurable reranker,
 versioned lifecycle operations, contradiction detection, and an MCP server so

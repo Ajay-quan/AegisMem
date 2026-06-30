@@ -1,8 +1,8 @@
-# AegisMem Architecture Paper
+# stateful.ai Architecture Paper
 
 ## Abstract
 
-AegisMem is a persistent memory layer for long-running LLM agents. It separates memory ingestion, lifecycle management, semantic retrieval, exact lookup, and graph traversal into service and adapter boundaries. For cost control, the demonstration deployment runs as one Dockerized Flask service on AWS Free Tier EC2 while keeping the internal structure compatible with a future multi-service deployment.
+stateful.ai is a persistent memory layer for long-running LLM agents. It separates memory ingestion, lifecycle management, semantic retrieval, exact lookup, and graph traversal into service and adapter boundaries. For cost control, the demonstration deployment runs as one Dockerized Flask service on AWS Free Tier EC2 while keeping the internal structure compatible with a future multi-service deployment.
 
 ## Problem
 
@@ -26,7 +26,7 @@ The Flask API is the public boundary. It delegates to a memory service that coor
 - `LocalMemoryGraph`: persistent graph with weighted BFS traversal.
 - `HotMemoryIndex`: latency-oriented cache index using a priority queue, hash map, and sorted recency tree.
 
-The production-style container runs Gunicorn and mounts `/data/aegismem` to an EBS-backed host directory. The FAISS index, graph file, and JSON store survive container restarts.
+The production-style container runs Gunicorn and mounts `/data/stateful_ai` to an EBS-backed host directory. The FAISS index, graph file, and JSON store survive container restarts.
 
 ## Retrieval Pipeline
 
@@ -49,7 +49,7 @@ Retrieval in the FastAPI service is a **hybrid** pipeline rather than dense-only
 4. Each fused candidate is scored on a weighted composite of semantic, lexical, recency (exponential decay), importance, and access-frequency signals. Similarity scores are clamped to `[0, 1]` so negative cosine values never silently drop candidates.
 5. A second-stage reranker applies diversity filtering and returns the top-k. The default is a heuristic reranker; a cross-encoder reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) is available via configuration and loads lazily with graceful fallback.
 
-The service is also exposed over the **Model Context Protocol** (`integrations/mcp_server.py`) so any MCP-capable agent can use AegisMem's memory directly through `remember`, `recall`, `forget`, and `list_memories` tools.
+The service is also exposed over the **Model Context Protocol** (`integrations/mcp_server.py`) so any MCP-capable agent can use stateful.ai's memory directly through `remember`, `recall`, `forget`, and `list_memories` tools.
 
 ## Algorithms and Data Structures
 
@@ -65,7 +65,7 @@ The hot-memory index uses:
 
 ## AWS Free Tier Deployment
 
-The AWS deployment intentionally avoids managed services. One EC2 Free Tier instance runs Docker. The container exposes Gunicorn on port 8000, mapped to host port 80. An 8 GB gp3 EBS root volume stores `/opt/aegismem/data`, mounted into the container at `/data/aegismem`.
+The AWS deployment intentionally avoids managed services. One EC2 Free Tier instance runs Docker. The container exposes Gunicorn on port 8000, mapped to host port 80. An 8 GB gp3 EBS root volume stores `/opt/stateful_ai/data`, mounted into the container at `/data/stateful_ai`.
 
 This validates cloud deployability without adding RDS, OpenSearch, EFS, S3, API Gateway, NAT Gateway, load balancers, Route 53, or other cost-bearing resources.
 
@@ -95,10 +95,10 @@ The Free Tier deployment is a single-node demonstration, not a horizontally dist
 
 ## Security and Portability Additions
 
-The Flask demo supports optional API-key authentication through `AEGISMEM_API_KEY`. When configured, all API routes require `X-API-Key`; `/`, `/demo`, and `/health` stay public for status and local UI access.
+The Flask demo supports optional API-key authentication through `STATEFUL_AI_API_KEY`. When configured, all API routes require `X-API-Key`; `/`, `/demo`, and `/health` stay public for status and local UI access.
 
 Memory updates append prior record states to version history instead of silently overwriting content. Import/export endpoints allow a complete memory snapshot to be saved, restored, or moved between local and EC2 demo environments without using S3 or a managed database.
 
 ## Optional ChromaDB Mode
 
-FAISS is the default vector store because it is lightweight and file-based. A local ChromaDB adapter is also available with `AEGISMEM_VECTOR_STORE=chroma`, using Chroma's persistent local client in the same EBS-mounted data directory. This keeps the FAISS/ChromaDB architecture claim defensible without provisioning a separate vector database service.
+FAISS is the default vector store because it is lightweight and file-based. A local ChromaDB adapter is also available with `STATEFUL_AI_VECTOR_STORE=chroma`, using Chroma's persistent local client in the same EBS-mounted data directory. This keeps the FAISS/ChromaDB architecture claim defensible without provisioning a separate vector database service.

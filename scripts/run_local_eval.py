@@ -1,5 +1,5 @@
 """
-AegisMem Benchmark Runner
+stateful.ai Benchmark Runner
 ==========================
 Runs the full evaluation suite with multi-K metrics and benchmark modes.
 
@@ -30,7 +30,7 @@ from tests.fixtures.conftest import MockPostgresStore
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="AegisMem Benchmark Suite")
+    parser = argparse.ArgumentParser(description="stateful.ai Benchmark Suite")
     parser.add_argument(
         "--mode", choices=["sanity", "expanded", "hard", "contradiction"],
         default="expanded", help="Benchmark mode",
@@ -40,7 +40,7 @@ def parse_args():
 
 async def main(mode: EvalMode):
     print("\n" + "=" * 65)
-    print(f"  AegisMem Benchmark Suite — {mode.value.upper()} mode")
+    print(f"  stateful.ai Benchmark Suite — {mode.value.upper()} mode")
     print("=" * 65 + "\n")
 
     # Setup: real embeddings, mock infrastructure.

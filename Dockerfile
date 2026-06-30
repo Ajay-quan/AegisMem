@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    AEGISMEM_DATA_DIR=/data/aegismem \
-    AEGISMEM_EMBEDDING_BACKEND=mock
+    STATEFUL_AI_DATA_DIR=/data/stateful_ai \
+    STATEFUL_AI_EMBEDDING_BACKEND=mock
 
 WORKDIR /app
 
@@ -18,11 +18,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
-RUN useradd --create-home --shell /usr/sbin/nologin aegismem \
-    && mkdir -p /data/aegismem \
-    && chown -R aegismem:aegismem /data/aegismem /app
+RUN useradd --create-home --shell /usr/sbin/nologin stateful_ai \
+    && mkdir -p /data/stateful_ai \
+    && chown -R stateful_ai:stateful_ai /data/stateful_ai /app
 
-USER aegismem
+USER stateful_ai
 
 EXPOSE 8000
 

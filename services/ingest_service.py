@@ -5,10 +5,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from core.config.settings import settings
 from core.schemas.memory import (
     MemoryItem, MemoryType, MemoryLayer, SourceType, Observation, MemoryStatus,
 )
 from domain.memory.scoring import compute_importance_heuristic
+from domain.privacy.redaction import redact
 from core.observability import metrics
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,23 @@ class IngestionService:
         importance_override: float | None = None,
     ) -> MemoryItem:
         """Convert an observation into a stored memory."""
-        importance = importance_override or compute_importance_heuristic(observation.content)
+        content = observation.content
+        extra_meta: dict[str, Any] = {}
+
+        # Privacy: redact PII at the boundary so nothing sensitive is ever
+        # embedded, written to the vector/graph stores, or later retrieved.
+        if settings.pii_redaction_enabled:
+            result = redact(content)
+            if result.redacted:
+                content = result.text
+                extra_meta["pii_redacted"] = True
+                extra_meta["pii_counts"] = result.counts
+                logger.info(
+                    f"Redacted {result.total} PII token(s) at ingest for "
+                    f"user {observation.user_id}: {result.counts}"
+                )
+
+        importance = importance_override or compute_importance_heuristic(content)
 
         memory = MemoryItem(
             namespace=f"user:{observation.user_id}",
@@ -50,20 +68,20 @@ class IngestionService:
             agent_id=observation.agent_id,
             memory_type=memory_type,
             memory_layer=self._classify_layer(memory_type),
-            content=observation.content,
+            content=content,
             source_type=observation.source_type,
             source_ref=observation.session_id,
             event_time=observation.observed_at,
             importance_score=importance,
-            metadata=observation.metadata,
+            metadata={**(observation.metadata or {}), **extra_meta},
         )
 
         # Save to relational store
         await self._db.save_memory(memory)
 
-        # Embed and save to vector store
+        # Embed and save to vector store (redacted content only)
         try:
-            embedding = await self._embed.embed_single(observation.content)
+            embedding = await self._embed.embed_single(content)
             memory.content_embedding = embedding
             await self._vs.upsert(
                 id=memory.memory_id,

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-AegisMem needs to prove cloud deployability without creating cost. Managed services such as RDS, OpenSearch, EFS, NAT Gateway, load balancers, Route 53 hosted zones, and API Gateway can improve production architecture but violate the zero-cost constraint.
+stateful.ai needs to prove cloud deployability without creating cost. Managed services such as RDS, OpenSearch, EFS, NAT Gateway, load balancers, Route 53 hosted zones, and API Gateway can improve production architecture but violate the zero-cost constraint.
 
 ## Decision
 

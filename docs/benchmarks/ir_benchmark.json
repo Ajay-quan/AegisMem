@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-30T05:17:24.854873+00:00",
+  "dataset": "stateful_ai-sample-personal-memory",
+  "embedding_backend": "mock (deterministic)",
+  "hybrid": {
+    "queries": 9,
+    "mrr": 0.7037,
+    "hit@1": 0.5556,
+    "precision@1": 0.5556,
+    "recall@1": 0.5556,
+    "ndcg@1": 0.5556,
+    "hit@3": 1.0,
+    "precision@3": 0.3333,
+    "recall@3": 0.9444,
+    "ndcg@3": 0.7563,
+    "hit@5": 1.0,
+    "precision@5": 0.2222,
+    "recall@5": 1.0,
+    "ndcg@5": 0.7826
+  },
+  "dense_only": {
+    "queries": 9,
+    "mrr": 0.3611,
+    "hit@1": 0.1111,
+    "precision@1": 0.1111,
+    "recall@1": 0.1111,
+    "ndcg@1": 0.1111,
+    "hit@3": 0.6667,
+    "precision@3": 0.2222,
+    "recall@3": 0.6111,
+    "ndcg@3": 0.3965,
+    "hit@5": 0.7778,
+    "precision@5": 0.1778,
+    "recall@5": 0.7778,
+    "ndcg@5": 0.4737
+  },
+  "delta_recall@5": 0.2222,
+  "delta_mrr": 0.3426
+}

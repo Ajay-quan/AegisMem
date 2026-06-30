@@ -37,8 +37,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx
-      - name: Run domain + service + API tests (no external infra)
+          pip install pytest pytest-asyncio pytest-cov httpx
+      - name: Run domain + service + API tests (no external infra) with coverage
         run: >
-          pytest tests/unit tests/integration tests/api/test_api.py
+          pytest tests/unit tests/integration tests/api
           --ignore=tests/unit/test_local_memory_components.py
+          --ignore=tests/api/test_flask_api.py
+          --cov=core --cov=domain --cov=services --cov=adapters
+          --cov=apps/api --cov=sdk --cov=integrations
+          --cov-report=term-missing
+        # Add `--cov-fail-under=<N>` once a coverage baseline is agreed.

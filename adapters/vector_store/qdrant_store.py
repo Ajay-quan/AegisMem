@@ -2,12 +2,26 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from core.exceptions import MemoryStorageError
 from .base import VectorStore, VectorSearchResult
 
 logger = logging.getLogger(__name__)
+
+# Stable namespace for deriving Qdrant point IDs from stateful.ai string ids.
+# Qdrant accepts integer or UUID point ids; Python's built-in ``hash()`` is
+# salted per-process (PYTHONHASHSEED), so the previous ``abs(hash(id))`` scheme
+# produced DIFFERENT point ids after every restart — silently orphaning vectors
+# and breaking delete/get. A UUIDv5 over the original id is deterministic across
+# processes and machines, so upsert/delete/get stay consistent forever.
+_POINT_ID_NAMESPACE = uuid.UUID("a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
+
+
+def point_id_for(memory_id: str) -> str:
+    """Deterministically map an stateful.ai string id to a stable Qdrant UUID id."""
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, memory_id))
 
 
 class QdrantStore(VectorStore):
@@ -17,7 +31,7 @@ class QdrantStore(VectorStore):
         self,
         host: str = "localhost",
         port: int = 6333,
-        collection_name: str = "aegismem_memories",
+        collection_name: str = "stateful_ai_memories",
     ) -> None:
         self.host = host
         self.port = port
@@ -52,8 +66,9 @@ class QdrantStore(VectorStore):
     ) -> None:
         from qdrant_client.models import PointStruct
         client = await self._get_client()
-        # Qdrant needs integer or UUID ids; use hash
-        point_id = abs(hash(id)) % (2**63)
+        # Qdrant needs integer or UUID ids; derive a deterministic UUID so the
+        # mapping is stable across process restarts (see point_id_for).
+        point_id = point_id_for(id)
         payload["_aegis_id"] = id  # store original string id
         await client.upsert(
             collection_name=self.collection_name,
@@ -99,7 +114,7 @@ class QdrantStore(VectorStore):
     async def delete(self, id: str) -> None:
         from qdrant_client.models import PointIdsList
         client = await self._get_client()
-        point_id = abs(hash(id)) % (2**63)
+        point_id = point_id_for(id)
         await client.delete(
             collection_name=self.collection_name,
             points_selector=PointIdsList(points=[point_id]),
@@ -107,7 +122,7 @@ class QdrantStore(VectorStore):
 
     async def get(self, id: str) -> VectorSearchResult | None:
         client = await self._get_client()
-        point_id = abs(hash(id)) % (2**63)
+        point_id = point_id_for(id)
         try:
             results = await client.retrieve(
                 collection_name=self.collection_name,

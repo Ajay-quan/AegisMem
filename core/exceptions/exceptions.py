@@ -1,43 +1,43 @@
-"""AegisMem custom exceptions."""
+"""stateful.ai custom exceptions."""
 
 
-class AegisMemError(Exception):
-    """Base exception for AegisMem."""
+class StatefulError(Exception):
+    """Base exception for stateful.ai."""
 
 
-class MemoryNotFoundError(AegisMemError):
+class MemoryNotFoundError(StatefulError):
     def __init__(self, memory_id: str) -> None:
         super().__init__(f"Memory not found: {memory_id}")
         self.memory_id = memory_id
 
 
-class MemoryStorageError(AegisMemError):
+class MemoryStorageError(StatefulError):
     """Error in storage backend."""
 
 
-class MemoryRetrievalError(AegisMemError):
+class MemoryRetrievalError(StatefulError):
     """Error during retrieval."""
 
 
-class EmbeddingError(AegisMemError):
+class EmbeddingError(StatefulError):
     """Error generating embeddings."""
 
 
-class LLMError(AegisMemError):
+class LLMError(StatefulError):
     """Error from LLM provider."""
 
 
-class ContradictionError(AegisMemError):
+class ContradictionError(StatefulError):
     """Error during contradiction detection."""
 
 
-class ConfigurationError(AegisMemError):
+class ConfigurationError(StatefulError):
     """Invalid configuration."""
 
 
-class NamespaceError(AegisMemError):
+class NamespaceError(StatefulError):
     """Invalid or inaccessible namespace."""
 
 
-class ValidationError(AegisMemError):
+class ValidationError(StatefulError):
     """Schema validation failure."""

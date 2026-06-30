@@ -5,14 +5,14 @@ API_URL = "http://localhost:8000/api/v1"
 HEALTH_URL = "http://localhost:8000/health"
 
 def run_demo():
-    print("🚀 Starting AegisMem Local Ollama Integration Demo...")
+    print("🚀 Starting stateful.ai Local Ollama Integration Demo...")
     
     # Wait for API to be ready
     for i in range(10):
         try:
             res = httpx.get(HEALTH_URL)
             if res.status_code == 200:
-                print("✅ AegisMem API is online.")
+                print("✅ stateful.ai API is online.")
                 break
         except httpx.ConnectError:
             print(f"⏳ Waiting for API to spin up (Attempt {i+1}/10)...")

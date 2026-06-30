@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a deterministic local AegisMem retrieval benchmark.
+"""Run a deterministic local stateful.ai retrieval benchmark.
 
 The benchmark uses no paid services and no network calls. It seeds synthetic
 memories, runs retrieval queries with expected relevant keys, measures ranking
@@ -26,7 +26,7 @@ from services.flask_memory_service import FlaskMemoryService
 CORE_DATASET = [
     ("python-pref", "Alice prefers Python, Flask, and FAISS for local vector search demos."),
     ("aws-free-tier", "Alice deploys demos on AWS Free Tier EC2 with EBS persistence and no managed databases."),
-    ("hash-index", "Exact lookup in AegisMem uses a SHA-256 hash map for constant-time key retrieval."),
+    ("hash-index", "Exact lookup in stateful.ai uses a SHA-256 hash map for constant-time key retrieval."),
     ("graph-bfs", "Graph retrieval uses weighted BFS traversal across related memory nodes."),
     ("docker-gunicorn", "The Flask API is containerized with Docker and served by Gunicorn on port 8000."),
     ("priority-cache", "Hot memories are tracked with a priority queue, hash map, and recency tree."),
@@ -94,7 +94,7 @@ def write_svg_bar_chart(path: Path, metrics: dict[str, float]) -> None:
     path.write_text(
         f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect width="100%" height="100%" fill="white"/>
-  <text x="30" y="38" font-size="22" font-family="Arial" font-weight="700">AegisMem Retrieval Quality</text>
+  <text x="30" y="38" font-size="22" font-family="Arial" font-weight="700">stateful.ai Retrieval Quality</text>
   <line x1="{chart_left}" y1="{chart_bottom}" x2="650" y2="{chart_bottom}" stroke="#333"/>
   <line x1="{chart_left}" y1="70" x2="{chart_left}" y2="{chart_bottom}" stroke="#333"/>
   {''.join(rects)}
@@ -116,7 +116,7 @@ def write_latency_svg(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text(
         f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect width="100%" height="100%" fill="white"/>
-  <text x="30" y="38" font-size="22" font-family="Arial" font-weight="700">AegisMem Retrieval Latency</text>
+  <text x="30" y="38" font-size="22" font-family="Arial" font-weight="700">stateful.ai Retrieval Latency</text>
   <line x1="70" y1="250" x2="660" y2="250" stroke="#333"/>
   <line x1="70" y1="70" x2="70" y2="250" stroke="#333"/>
   <polyline points="{poly}" fill="none" stroke="#e95f35" stroke-width="3"/>

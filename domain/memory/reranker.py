@@ -2,8 +2,9 @@
 
 Architecture:
     BaseReranker          — abstract interface for pluggable rerankers
-    HeuristicReranker     — config-driven composite reranking (default)
-    CrossEncoderReranker  — stub for future cross-encoder integration
+    HeuristicReranker     — config-driven composite reranking + diversity (default)
+    CrossEncoderReranker  — lazy-loaded ms-marco cross-encoder with heuristic
+                            fallback (enabled via RERANKER_TYPE=cross_encoder)
 """
 from __future__ import annotations
 

@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aegismem"
-version = "0.1.0"
-description = "Persistent Memory Architecture for Long-Running LLM Agents"
+name = "stateful_ai"
+version = "0.3.0"
+description = "stateful.ai — self-improving persistent memory for long-running LLM agents (engine: stateful.ai)"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-authors = [{ name = "AegisMem Contributors" }]
+authors = [{ name = "stateful.ai Contributors" }]
 
 # Lean core: exactly what the FastAPI service imports to run end-to-end in the
 # zero-infra default (in-memory relational + vector + graph stores, mock or
@@ -68,7 +68,7 @@ docs = [
 ]
 # Everything (production deployment)
 all = [
-    "aegismem[postgres,qdrant,neo4j,queue,embeddings,llm,observability,agent,mcp]",
+    "stateful_ai[postgres,qdrant,neo4j,queue,embeddings,llm,observability,agent,mcp]",
 ]
 
 [tool.ruff]

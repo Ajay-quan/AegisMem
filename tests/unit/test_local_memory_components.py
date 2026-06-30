@@ -1,4 +1,4 @@
-"""Tests for local AegisMem demo components."""
+"""Tests for local stateful.ai demo components."""
 from __future__ import annotations
 
 from adapters.graph_store.memory_graph import LocalMemoryGraph

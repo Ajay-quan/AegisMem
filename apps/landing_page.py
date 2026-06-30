@@ -1,846 +1,860 @@
-"""Static product pages for the Flask demonstration app."""
+"""Product pages for the stateful.ai demonstration app.
 
-LANDING_HTML = r"""
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AegisMem | Memory infrastructure for AI agents</title>
-  <meta name="description" content="AegisMem is a persistent memory layer for long-running AI agents." />
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #050605;
-      --panel: #0d0f0c;
-      --panel-2: #12150f;
-      --ink: #f5f1e8;
-      --muted: #a5a095;
-      --line: rgba(245, 241, 232, 0.16);
-      --green: #a6ff8f;
-      --amber: #d8ac62;
-      --blue: #9ab7c9;
-      --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
-      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    [data-theme="light"] {
-      color-scheme: light;
-      --bg: #f1ecdf;
-      --panel: #fffaf0;
-      --panel-2: #f7f0e4;
-      --ink: #11130f;
-      --muted: #69645a;
-      --line: rgba(17, 19, 15, 0.15);
-      --green: #4e7f35;
-      --amber: #9a6d2c;
-      --blue: #587287;
-    }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      color: var(--ink);
-      font-family: var(--sans);
-      background:
-        radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--green) 12%, transparent), transparent 28rem),
-        radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--blue) 13%, transparent), transparent 28rem),
-        linear-gradient(var(--line) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line) 1px, transparent 1px),
-        var(--bg);
-      background-size: auto, auto, 64px 64px, 64px 64px, auto;
-      letter-spacing: 0;
-    }
-    body::after {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.12;
-      background-image: radial-gradient(currentColor 0.5px, transparent 0.5px);
-      background-size: 4px 4px;
-      z-index: 1;
-    }
-    a { color: inherit; text-decoration: none; }
-    button { font: inherit; }
-    .page { position: relative; z-index: 2; overflow: clip; }
-    .shell { width: min(1220px, calc(100% - 36px)); margin: 0 auto; }
-    .nav {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      border-bottom: 1px solid var(--line);
-      background: color-mix(in srgb, var(--bg) 84%, transparent);
-      backdrop-filter: blur(18px);
-    }
-    .nav-inner {
-      min-height: 74px;
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      gap: 22px;
-    }
-    .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 760; font-size: 18px; }
-    .logo { width: 36px; height: 36px; object-fit: contain; filter: invert(1); }
-    [data-theme="light"] .logo { filter: none; }
-    .nav-links { display: flex; gap: 20px; align-items: center; color: var(--muted); font-size: 14px; }
-    .nav-links a:hover, .nav-links a.active { color: var(--ink); }
-    .nav-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
-    .btn {
-      min-height: 40px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: color-mix(in srgb, var(--panel) 80%, transparent);
-      color: var(--ink);
-      padding: 0 14px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      cursor: pointer;
-      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
-    }
-    .btn:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--green) 54%, var(--line)); }
-    .btn.primary { background: var(--green); color: #061006; border-color: var(--green); font-weight: 760; }
-    .icon-btn { width: 40px; padding: 0; }
-    section { padding: 96px 0; scroll-margin-top: 90px; }
-    .hero { min-height: calc(100vh - 74px); display: grid; align-items: center; padding: 78px 0 96px; }
-    .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(390px, 0.9fr); gap: 56px; align-items: center; }
-    .eyebrow { margin: 0 0 18px; color: var(--green); font: 760 12px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
-    h1, h2, h3, p { margin-top: 0; }
-    h1 { font-size: clamp(62px, 8.8vw, 126px); line-height: 0.88; letter-spacing: 0; margin-bottom: 26px; max-width: 920px; }
-    h2 { font-size: clamp(38px, 5vw, 72px); line-height: 0.95; letter-spacing: 0; margin-bottom: 22px; max-width: 900px; }
-    h3 { font-size: 22px; margin-bottom: 10px; }
-    .lede { color: var(--muted); font-size: clamp(18px, 2vw, 22px); line-height: 1.55; max-width: 780px; }
-    .hero-actions { margin-top: 34px; display: flex; flex-wrap: wrap; gap: 10px; }
-    .manifest {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(7, 9, 7, 0.86);
-      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
-      overflow: hidden;
-    }
-    [data-theme="light"] .manifest { background: #11130f; color: #f5f1e8; }
-    .manifest-head {
-      min-height: 48px;
-      border-bottom: 1px solid rgba(245,241,232,0.14);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 14px;
-      color: #aaa;
-      font: 700 11px/1 var(--mono);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .manifest-body { padding: 18px; font: 13px/1.65 var(--mono); color: #d9d4c9; min-height: 470px; }
-    .manifest .ok { color: var(--green); }
-    .manifest .key { color: var(--blue); }
-    .manifest .num { color: var(--amber); }
-    .manifest-band { padding-top: 0; }
-    .manifest-band .manifest-body { min-height: 360px; }
-    .scanline {
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--green), transparent);
-      animation: scan 3.4s ease-in-out infinite;
-    }
-    @keyframes scan { 50% { transform: translateY(428px); opacity: 1; } 0%,100% { opacity: 0.35; } }
-    .value-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
-    .value {
-      min-height: 260px;
-      padding: 24px;
-      border-right: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-      background: color-mix(in srgb, var(--panel) 76%, transparent);
-      transition: background 180ms ease, transform 180ms ease;
-    }
-    .value:hover { background: var(--panel); transform: translateY(-3px); }
-    .value .num { color: var(--green); font: 800 13px/1 var(--mono); margin-bottom: 70px; display: block; }
-    .value p, .card p, .trust p { color: var(--muted); line-height: 1.55; }
-    .product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    .card, .trust, .cta-panel {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--panel) 82%, transparent);
-      padding: 26px;
-      box-shadow: 0 20px 70px rgba(0,0,0,0.22);
-    }
-    .card {
-      min-height: 300px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      transition: transform 180ms ease, border-color 180ms ease;
-    }
-    .card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--green) 48%, var(--line)); }
-    .tag { color: var(--green); font: 800 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
-    .spec { border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font: 700 12px/1.55 var(--mono); }
-    .trust-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
-    .trust { min-height: 340px; }
-    .trust-list { display: grid; gap: 12px; margin-top: 22px; }
-    .trust-list div { border: 1px solid var(--line); border-radius: 6px; padding: 13px; color: var(--muted); background: color-mix(in srgb, var(--panel-2) 72%, transparent); }
-    .architecture-showcase { display: grid; grid-template-columns: 0.82fr 1.18fr; gap: 28px; align-items: center; }
-    .stack-stage {
-      min-height: 640px;
-      position: relative;
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #070807;
-      box-shadow: 0 28px 90px rgba(0,0,0,0.34);
-    }
-    .iso-stack {
-      position: relative;
-      width: min(680px, 96%);
-      height: 560px;
-      transform: translateY(10px);
-    }
-    .iso-layer {
-      position: absolute;
-      left: 10%;
-      width: 66%;
-      height: 118px;
-      border: 1px solid rgba(245, 241, 232, 0.18);
-      transform: skewY(29deg) rotate(-29deg);
-      transform-origin: center;
-      background: rgba(255,255,255,0.015);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
-    }
-    .iso-top {
-      top: 28px;
-      height: 210px;
-      border-color: var(--green);
-      background:
-        radial-gradient(circle, rgba(245,241,232,0.82) 1.4px, transparent 1.8px),
-        linear-gradient(135deg, rgba(166,255,143,0.08), rgba(154,183,201,0.04));
-      background-size: 22px 22px, auto;
-      animation: floatTop 4s ease-in-out infinite;
-      filter: drop-shadow(2px 0 0 #ff2434) drop-shadow(-2px 0 0 #00b7ff);
-    }
-    .iso-mid-1 { top: 218px; }
-    .iso-mid-2 { top: 318px; }
-    .iso-mid-3 { top: 418px; }
-    @keyframes floatTop { 50% { transform: translateY(-8px) skewY(29deg) rotate(-29deg); } }
-    .iso-label {
-      position: absolute;
-      left: 8%;
-      color: var(--ink);
-      font: 900 clamp(20px, 3vw, 34px)/1 var(--mono);
-      letter-spacing: 0.02em;
-      transform: rotate(24deg);
-      text-shadow: 2px 0 #ff2434, -2px 0 #00b7ff;
-      white-space: nowrap;
-    }
-    .iso-label.ltop { top: 215px; }
-    .iso-label.l1 { top: 330px; color: rgba(245,241,232,0.9); }
-    .iso-label.l2 { top: 432px; color: rgba(245,241,232,0.84); }
-    .iso-label.l3 { top: 532px; color: rgba(245,241,232,0.78); }
-    .node-dot {
-      position: absolute;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: var(--green);
-      filter: drop-shadow(2px 0 0 #ff2434) drop-shadow(-2px 0 0 #00b7ff);
-      animation: nodePulse 2.4s ease-in-out infinite;
-    }
-    @keyframes nodePulse { 50% { transform: scale(1.32); } }
-    .d1 { left: 31%; top: 112px; } .d2 { left: 45%; top: 86px; } .d3 { left: 58%; top: 118px; }
-    .d4 { left: 36%; top: 174px; } .d5 { left: 50%; top: 150px; } .d6 { left: 64%; top: 180px; }
-    .d7 { left: 42%; top: 234px; } .d8 { left: 56%; top: 258px; }
-    .audience {
-      position: absolute;
-      right: 6%;
-      color: rgba(245,241,232,0.82);
-      font: 800 clamp(14px, 2vw, 24px)/1 var(--mono);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-    .audience::before {
-      content: "";
-      position: absolute;
-      left: -58px;
-      top: 50%;
-      width: 40px;
-      border-top: 1px dotted rgba(245,241,232,0.55);
-    }
-    .a1 { top: 245px; } .a2 { top: 350px; } .a3 { top: 458px; }
-    .hero .stack-stage { min-height: 570px; }
-    .hero .iso-stack { transform: translateY(-10px) scale(0.9); }
-    .hero .iso-label.ltop { top: 216px; }
-    .engine-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-    .engine { border: 1px solid var(--line); border-radius: 8px; min-height: 230px; padding: 18px; background: linear-gradient(145deg, color-mix(in srgb, var(--panel) 86%, transparent), color-mix(in srgb, var(--green) 8%, transparent)); display: flex; flex-direction: column; justify-content: space-between; }
-    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-    .chip { border: 1px solid var(--line); border-radius: 999px; padding: 8px 11px; color: var(--muted); font: 700 12px/1 var(--mono); }
-    .cta-panel { text-align: center; padding: 72px 26px; }
-    .cta-panel .lede { margin-left: auto; margin-right: auto; }
-    .footer { border-top: 1px solid var(--line); padding: 48px 0; }
-    .footer-grid { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 24px; color: var(--muted); }
-    .footer a { display: block; color: var(--muted); margin: 8px 0; font-size: 14px; }
-    .reveal { opacity: 0; transform: translateY(18px); transition: opacity 680ms ease, transform 680ms ease; }
-    .reveal.visible { opacity: 1; transform: translateY(0); }
-    @media (max-width: 980px) {
-      .nav-inner { grid-template-columns: 1fr auto; padding: 14px 0; }
-      .nav-links { order: 3; grid-column: 1 / -1; overflow-x: auto; padding-bottom: 4px; }
-      .hero-grid, .trust-grid, .architecture-showcase { grid-template-columns: 1fr; }
-      .value-grid, .engine-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .product-grid { grid-template-columns: 1fr; }
-      .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .stack-stage { min-height: 560px; }
-    }
-    @media (max-width: 620px) {
-      .shell { width: min(100% - 28px, 1220px); }
-      section { padding: 72px 0; }
-      h1 { font-size: 58px; }
-      .value-grid, .engine-grid, .footer-grid { grid-template-columns: 1fr; }
-      .nav-actions .btn:not(.icon-btn) { display: none; }
-      .manifest-body { min-height: 380px; }
-      .stack-stage { min-height: 500px; }
-      .iso-stack { width: 760px; transform: translateX(-132px) scale(0.68); transform-origin: left center; }
-      .audience { display: none; }
-    }
-  </style>
-</head>
-<body>
-<div class="page">
-  <nav class="nav">
-    <div class="shell nav-inner">
-      <a class="brand" href="#top"><img class="logo" src="/static/brain.png" alt="" />AegisMem</a>
-      <div class="nav-links">
-        <a href="#platform">Platform</a><a href="#products">Products</a><a href="#architecture">Architecture</a><a href="#trust">Trust</a><a href="#use-cases">Use cases</a>
-      </div>
-      <div class="nav-actions">
-        <button class="btn icon-btn" id="theme-toggle" aria-label="Toggle theme">+-</button>
-        <a class="btn" href="/demo">Play demo</a>
-        <a class="btn primary" href="https://github.com/Ajay-quan/AegisMem">GitHub</a>
-      </div>
-    </div>
-  </nav>
-  <main id="top">
-    <section class="hero shell">
-      <div class="hero-grid">
-        <div class="reveal">
-          <p class="eyebrow">Persistent context infrastructure</p>
-          <h1>Memory for agents that work over time.</h1>
-          <p class="lede">AegisMem is the durable memory layer between your application and your AI agent. It captures useful context, retrieves the right records later, and keeps long-running work consistent across sessions.</p>
-          <div class="hero-actions"><a class="btn primary" href="/demo">Launch memory demo</a><a class="btn" href="#architecture">View architecture</a></div>
-        </div>
-        <div class="stack-stage reveal" aria-label="Isometric AegisMem architecture stack">
-          <div class="iso-stack">
-            <div class="iso-layer iso-mid-3"></div>
-            <div class="iso-layer iso-mid-2"></div>
-            <div class="iso-layer iso-mid-1"></div>
-            <div class="iso-layer iso-top"></div>
-            <span class="iso-label ltop">Persistent memory layer</span>
-            <span class="iso-label l1">Agent context</span>
-            <span class="iso-label l2">Retrieval engine</span>
-            <span class="iso-label l3">Memory control</span>
-            <span class="node-dot d1"></span><span class="node-dot d2"></span><span class="node-dot d3"></span><span class="node-dot d4"></span><span class="node-dot d5"></span><span class="node-dot d6"></span><span class="node-dot d7"></span><span class="node-dot d8"></span>
-            <span class="audience a1">Agent builders</span>
-            <span class="audience a2">Product teams</span>
-            <span class="audience a3">Long workflows</span>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section class="shell manifest-band">
-      <div class="manifest reveal" aria-label="AegisMem agent manifest">
-        <div class="manifest-head"><span>// AegisMem agent manifest //</span><span>ready</span></div>
-        <div class="scanline"></div>
-        <div class="manifest-body">
-&gt; <span class="ok">[ok]</span> Agent handshake initialized<br />
-&gt; <span class="ok">[ok]</span> Human session detected<br />
-&gt; <span class="ok">[ok]</span> Memory layer available<br />
-&gt; <span class="ok">[ok]</span> Context graph indexed<br /><br />
-{<br />
-&nbsp;&nbsp;<span class="key">"page_type"</span>: "agent_memory_platform",<br />
-&nbsp;&nbsp;<span class="key">"primary_cta"</span>: "Play memory demo",<br />
-&nbsp;&nbsp;<span class="key">"capabilities"</span>: [<br />
-&nbsp;&nbsp;&nbsp;&nbsp;"capture_context",<br />
-&nbsp;&nbsp;&nbsp;&nbsp;"retrieve_relevant_memory",<br />
-&nbsp;&nbsp;&nbsp;&nbsp;"inspect_and_delete_records",<br />
-&nbsp;&nbsp;&nbsp;&nbsp;"maintain_project_continuity"<br />
-&nbsp;&nbsp;],<br />
-&nbsp;&nbsp;<span class="key">"retrieval_profile"</span>: {<br />
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"precision_at_1"</span>: <span class="num">1.0</span>,<br />
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"avg_latency_ms"</span>: <span class="num">10.3</span><br />
-&nbsp;&nbsp;}<br />
-}<br /><br />
-&gt; <span class="ok">[ok]</span> Agent context generated
-        </div>
-      </div>
-    </section>
-    <section class="shell" id="platform">
-      <p class="eyebrow reveal">Built for agents. Ready for continuity.</p>
-      <div class="value-grid">
-        <article class="value reveal"><span class="num">01</span><h3>You bring agents. We bring memory.</h3><p>Keep useful user preferences, project facts, and decisions available beyond a single chat session.</p></article>
-        <article class="value reveal"><span class="num">02</span><h3>Every session can build on the last.</h3><p>Agents retrieve what matters before they respond, so answers stay consistent over time.</p></article>
-        <article class="value reveal"><span class="num">03</span><h3>Memory is managed, not hidden.</h3><p>Records can be inspected, exported, updated, and deleted instead of becoming an invisible black box.</p></article>
-        <article class="value reveal"><span class="num">04</span><h3>Designed for compact infrastructure.</h3><p>Run a serious memory workflow with a lightweight API, local persistence, and retrieval that stays fast.</p></article>
-      </div>
-    </section>
-    <section class="shell" id="products">
-      <div class="reveal"><p class="eyebrow">Memory products</p><h2>Memory that scales with agent ambition.</h2></div>
-      <div class="product-grid">
-        <article class="card reveal"><span class="tag">01 Capture</span><div><h3>Session memory</h3><p>Turn important interactions into durable records with user, key, metadata, and importance signals.</p></div><div class="spec">POST /api/v1/memories<br />Capture context</div></article>
-        <article class="card reveal"><span class="tag">02 Recall</span><div><h3>Relevant retrieval</h3><p>Find context for the current task without flooding the agent with unrelated history.</p></div><div class="spec">POST /api/v1/retrieve<br />Return ranked memories</div></article>
-        <article class="card reveal"><span class="tag">03 Control</span><div><h3>Inspectable memory</h3><p>Look up exact memories, traverse related records, export snapshots, and remove stale context.</p></div><div class="spec">GET / DELETE / EXPORT<br />Manage memory lifecycle</div></article>
-      </div>
-    </section>
-    <section class="shell" id="architecture">
-      <div class="architecture-showcase">
-        <div class="trust reveal"><p class="eyebrow">Architecture</p><h2>The memory stack for agent continuity.</h2><p>AegisMem sits between your application and your agent. It captures useful context, stores it as manageable memory, retrieves the right records, and returns a focused context pack before the agent responds.</p><div class="chip-row"><span class="chip">Applications</span><span class="chip">AI agents</span><span class="chip">Teams</span></div></div>
-        <div class="stack-stage reveal" aria-label="Isometric architecture stack illustration">
-          <div class="iso-stack">
-            <div class="iso-layer iso-mid-3"></div>
-            <div class="iso-layer iso-mid-2"></div>
-            <div class="iso-layer iso-mid-1"></div>
-            <div class="iso-layer iso-top"></div>
-            <span class="iso-label ltop">Persistent memory layer</span>
-            <span class="iso-label l1">Agent context</span>
-            <span class="iso-label l2">Retrieval engine</span>
-            <span class="iso-label l3">Memory control</span>
-            <span class="node-dot d1"></span><span class="node-dot d2"></span><span class="node-dot d3"></span><span class="node-dot d4"></span><span class="node-dot d5"></span><span class="node-dot d6"></span><span class="node-dot d7"></span><span class="node-dot d8"></span>
-            <span class="audience a1">AI developers</span>
-            <span class="audience a2">Product teams</span>
-            <span class="audience a3">Long-running agents</span>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section class="shell" id="trust">
-      <div class="reveal"><p class="eyebrow">Secure by design. Manageable by default.</p><h2>Persistent memory should earn user trust.</h2></div>
-      <div class="trust-grid"><div class="trust reveal"><h3>Control surfaces</h3><div class="trust-list"><div>Inspectable records</div><div>Deletable memories</div><div>Portable import/export snapshots</div><div>Optional API-key protection</div></div></div><div class="trust reveal"><h3>Quality surfaces</h3><div class="trust-list"><div>Relevant recall instead of raw history dumps</div><div>Versioned updates for memory lifecycle</div><div>Graph traversal for related context</div><div>Fast local retrieval for demo environments</div></div></div></div>
-    </section>
-    <section class="shell" id="use-cases">
-      <div class="reveal"><p class="eyebrow">Use cases</p><h2>The engines of agent continuity.</h2></div>
-      <div class="engine-grid"><article class="engine reveal"><span class="tag">Interview</span><h3>Prep agents</h3><p>Remember feedback, weak areas, and preferred answer style.</p></article><article class="engine reveal"><span class="tag">Coding</span><h3>Dev assistants</h3><p>Preserve architecture, constraints, errors, and fixes.</p></article><article class="engine reveal"><span class="tag">Research</span><h3>Research agents</h3><p>Track notes, papers, hypotheses, and conclusions.</p></article><article class="engine reveal"><span class="tag">Personal</span><h3>Productivity agents</h3><p>Remember routines, recurring tasks, preferences, and goals.</p></article></div>
-    </section>
-    <section class="shell"><div class="cta-panel reveal"><p class="eyebrow">AegisMem</p><h2>Build agents that remember what matters.</h2><p class="lede">Give your agent a memory layer for persistent context, relevant recall, and better continuity across sessions.</p><div class="hero-actions" style="justify-content:center"><a class="btn primary" href="/demo">Play the demo</a><a class="btn" href="https://github.com/Ajay-quan/AegisMem">View GitHub</a></div></div></section>
-  </main>
-  <footer class="footer"><div class="shell footer-grid"><div><div class="brand"><img class="logo" src="/static/brain.png" alt="" />AegisMem</div><p>Persistent memory for long-running AI agents.</p></div><div><strong>Platform</strong><a href="#platform">Overview</a><a href="#products">Products</a></div><div><strong>System</strong><a href="#architecture">Architecture</a><a href="#trust">Trust</a></div><div><strong>Project</strong><a href="/demo">Demo</a><a href="https://github.com/Ajay-quan/AegisMem">GitHub</a></div><div><strong>Docs</strong><a href="/docs">API docs</a><a href="/health">Health</a></div></div></footer>
-</div>
-<script>
-const root = document.documentElement;
-const savedTheme = localStorage.getItem("aegismem_theme");
-if (savedTheme) root.dataset.theme = savedTheme;
-document.getElementById("theme-toggle").addEventListener("click", () => {
-  const next = root.dataset.theme === "light" ? "dark" : "light";
-  root.dataset.theme = next;
-  localStorage.setItem("aegismem_theme", next);
-});
-const reveals = document.querySelectorAll(".reveal");
-const revealObserver = new IntersectionObserver((entries) => {
-  entries.forEach((entry) => {
-    if (entry.isIntersecting) {
-      entry.target.classList.add("visible");
-      revealObserver.unobserve(entry.target);
-    }
-  });
-}, { threshold: 0.12 });
-reveals.forEach((el) => revealObserver.observe(el));
-const links = [...document.querySelectorAll(".nav-links a")];
-const sections = links.map((link) => document.querySelector(link.getAttribute("href"))).filter(Boolean);
-const navObserver = new IntersectionObserver((entries) => {
-  entries.forEach((entry) => {
-    if (!entry.isIntersecting) return;
-    links.forEach((link) => link.classList.toggle("active", link.getAttribute("href") === "#" + entry.target.id));
-  });
-}, { rootMargin: "-35% 0px -55% 0px" });
-sections.forEach((section) => navObserver.observe(section));
-</script>
-</body>
-</html>
+Two self-contained pages, no build step:
+
+- ``LANDING_HTML``  - marketing/product page served at ``/``
+- ``DEMO_HTML``     - live operations console served at ``/demo``
+
+Both share a glassmorphism design system: deep layered background,
+frosted translucent panels, restrained accent gradient, and a minimal,
+professional type scale.
 """
 
+# ---------------------------------------------------------------------------
+# Shared design system (inlined into both pages)
+# ---------------------------------------------------------------------------
 
-DEMO_HTML = r"""
-<!doctype html>
+_BASE_CSS = r"""
+  :root {
+    color-scheme: dark;
+    --bg0: #05060c;
+    --bg1: #0a0d18;
+    --ink: #eef1f8;
+    --muted: #949cb0;
+    --faint: #5d6478;
+    --glass: rgba(255, 255, 255, 0.045);
+    --glass-2: rgba(255, 255, 255, 0.075);
+    --stroke: rgba(255, 255, 255, 0.10);
+    --stroke-2: rgba(255, 255, 255, 0.16);
+    --cyan: #38d4f5;
+    --indigo: #7c8cf8;
+    --violet: #a78bfa;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --accent-grad: linear-gradient(135deg, var(--cyan), var(--indigo) 60%, var(--violet));
+    --radius: 18px;
+    --radius-sm: 12px;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.65);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg0);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* Layered ambient background */
+  .ambient {
+    position: fixed; inset: 0; z-index: -2; pointer-events: none;
+    background:
+      radial-gradient(42rem 30rem at 12% -8%, rgba(124, 140, 248, 0.16), transparent 60%),
+      radial-gradient(38rem 26rem at 88% 4%, rgba(56, 212, 245, 0.11), transparent 60%),
+      radial-gradient(50rem 36rem at 50% 110%, rgba(167, 139, 250, 0.10), transparent 65%),
+      linear-gradient(180deg, var(--bg1), var(--bg0) 42%);
+  }
+  .ambient::after {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(70rem 42rem at 50% 0%, rgba(0,0,0,0.9), transparent 75%);
+    -webkit-mask-image: radial-gradient(70rem 42rem at 50% 0%, rgba(0,0,0,0.9), transparent 75%);
+  }
+  /* Glass primitives */
+  .glass {
+    background: var(--glass);
+    border: 1px solid var(--stroke);
+    border-radius: var(--radius);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+  .grad-text {
+    background: var(--accent-grad);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.72rem 1.35rem; border-radius: 999px;
+    font: 600 0.92rem var(--sans); letter-spacing: 0.01em;
+    text-decoration: none; cursor: pointer; border: 1px solid transparent;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    user-select: none;
+  }
+  .btn:active { transform: translateY(1px) scale(0.99); }
+  .btn-primary {
+    color: #061018; background: var(--accent-grad);
+    box-shadow: 0 10px 28px -10px rgba(86, 140, 245, 0.55);
+  }
+  .btn-primary:hover { box-shadow: 0 14px 36px -10px rgba(86, 140, 245, 0.75); transform: translateY(-1px); }
+  .btn-ghost {
+    color: var(--ink); background: var(--glass-2); border-color: var(--stroke-2);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.11); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.32rem 0.85rem; border-radius: 999px;
+    font: 500 0.78rem var(--sans); color: var(--muted);
+    background: var(--glass); border: 1px solid var(--stroke);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+  ::selection { background: rgba(124, 140, 248, 0.35); }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+"""
+
+# ---------------------------------------------------------------------------
+# Landing page
+# ---------------------------------------------------------------------------
+
+LANDING_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AegisMem Demo | Guided Terminal</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #070807;
-      --panel: #10130e;
-      --panel-2: #151912;
-      --ink: #f5f1e8;
-      --muted: #aaa59a;
-      --line: rgba(245, 241, 232, 0.16);
-      --green: #a6ff8f;
-      --amber: #d8ac62;
-      --blue: #9ab7c9;
-      --red: #ff7a7a;
-      --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
-      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--ink);
-      font-family: var(--sans);
-      background:
-        radial-gradient(circle at 18% 8%, rgba(166,255,143,0.12), transparent 30rem),
-        radial-gradient(circle at 84% 16%, rgba(154,183,201,0.12), transparent 28rem),
-        linear-gradient(rgba(245,241,232,0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(245,241,232,0.06) 1px, transparent 1px),
-        var(--bg);
-      background-size: auto, auto, 48px 48px, 48px 48px, auto;
-      letter-spacing: 0;
-    }
-    a { color: inherit; text-decoration: none; }
-    button, input { font: inherit; }
-    .page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 22px 0 34px; }
-    .topbar {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(12,14,11,0.82);
-      min-height: 64px;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      backdrop-filter: blur(18px);
-    }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 780; font-size: 18px; }
-    .logo { width: 36px; height: 36px; filter: invert(1); }
-    .btn {
-      min-height: 42px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 0 14px;
-      color: var(--ink);
-      background: rgba(255,255,255,0.04);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      cursor: pointer;
-      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-    }
-    .btn:hover { transform: translateY(-2px); border-color: rgba(166,255,143,0.44); }
-    .btn.primary { background: var(--green); border-color: var(--green); color: #061006; font-weight: 800; }
-    .hero { padding: 30px 0 18px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: end; }
-    h1 { margin: 0 0 12px; font-size: clamp(44px, 7vw, 88px); line-height: 0.9; letter-spacing: 0; }
-    .lede { margin: 0; color: var(--muted); font-size: 18px; line-height: 1.5; max-width: 780px; }
-    .scoreboard { display: grid; grid-template-columns: repeat(3, 120px); gap: 10px; }
-    .score { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 13px; }
-    .score strong { display: block; font-size: 26px; }
-    .score span { color: var(--muted); font: 800 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
-    .demo-grid { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: stretch; }
-    .terminal, .side {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: rgba(16,19,14,0.92);
-      box-shadow: 0 24px 90px rgba(0,0,0,0.36);
-      overflow: hidden;
-    }
-    .head {
-      min-height: 54px;
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 16px;
-      color: var(--muted);
-      font: 800 12px/1 var(--mono);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .traffic { display: flex; gap: 7px; }
-    .traffic span { width: 10px; height: 10px; border-radius: 50%; }
-    .traffic span:nth-child(1) { background: #ff6b62; } .traffic span:nth-child(2) { background: #e0b35a; } .traffic span:nth-child(3) { background: #68d783; }
-    .terminal-screen {
-      min-height: 540px;
-      max-height: 640px;
-      overflow: auto;
-      padding: 18px;
-      background:
-        linear-gradient(rgba(166,255,143,0.035) 1px, transparent 1px),
-        #080a07;
-      background-size: 100% 28px;
-      font: 14px/1.62 var(--mono);
-    }
-    .line { display: grid; grid-template-columns: 108px 1fr; gap: 12px; margin-bottom: 9px; animation: rise 220ms ease both; }
-    @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-    .time { color: rgba(245,241,232,0.38); }
-    .sys { color: var(--blue); }
-    .ok { color: var(--green); }
-    .warn { color: var(--amber); }
-    .err { color: var(--red); }
-    .user { color: var(--ink); }
-    .input-row {
-      border-top: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 16px;
-      background: rgba(255,255,255,0.035);
-      font-family: var(--mono);
-    }
-    .prompt { color: var(--green); font-weight: 900; }
-    #terminal-input {
-      width: 100%;
-      border: 0;
-      outline: 0;
-      background: transparent;
-      color: var(--ink);
-      font-family: var(--mono);
-      font-size: 15px;
-    }
-    .side-body { padding: 16px; display: grid; gap: 14px; }
-    .guide-card {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(255,255,255,0.035);
-      padding: 16px;
-    }
-    .guide-card h3 { margin: 0 0 8px; font-size: 20px; }
-    .guide-card p { color: var(--muted); line-height: 1.5; margin: 0; }
-    .step-list { display: grid; gap: 10px; }
-    .step {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 13px;
-      color: var(--muted);
-      background: rgba(0,0,0,0.18);
-      transition: transform 180ms ease, border-color 180ms ease, color 180ms ease;
-    }
-    .step.active { color: var(--ink); border-color: rgba(166,255,143,0.55); transform: translateX(4px); }
-    .step.done { color: var(--green); border-color: rgba(154,183,201,0.42); }
-    .quick { display: flex; flex-wrap: wrap; gap: 8px; }
-    .quick button { min-height: 34px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,0.035); padding: 0 10px; cursor: pointer; }
-    .quick button:hover { color: var(--ink); border-color: rgba(166,255,143,0.45); }
-    .lifecycle {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #080a07;
-      padding: 14px;
-      display: grid;
-      gap: 10px;
-    }
-    .life-node {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      color: var(--muted);
-      background: rgba(255,255,255,0.03);
-      position: relative;
-      transition: border-color 180ms ease, color 180ms ease, transform 180ms ease;
-    }
-    .life-node:not(:last-child)::after {
-      content: "";
-      position: absolute;
-      left: 22px;
-      bottom: -11px;
-      height: 10px;
-      border-left: 1px dotted rgba(166,255,143,0.42);
-    }
-    .life-node.active { color: var(--ink); border-color: rgba(166,255,143,0.56); transform: translateX(4px); }
-    .life-node.done { color: var(--green); border-color: rgba(154,183,201,0.42); }
-    .life-node b { display: block; margin-bottom: 4px; }
-    .life-node span { display: block; font: 12px/1.4 var(--mono); }
-    @media (max-width: 920px) {
-      .hero, .demo-grid { grid-template-columns: 1fr; }
-      .scoreboard { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .terminal { order: -1; }
-    }
-    @media (max-width: 620px) {
-      .page { width: min(100% - 24px, 1180px); }
-      .topbar { align-items: flex-start; flex-direction: column; }
-      .topbar .btn { width: 100%; }
-      .scoreboard { grid-template-columns: 1fr; }
-      .line { grid-template-columns: 1fr; gap: 2px; }
-      .terminal-screen { min-height: 480px; }
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stateful.ai — Memory infrastructure for AI agents</title>
+<meta name="description" content="stateful.ai is a production-grade persistent memory layer for long-running AI agents: hybrid retrieval, versioned lifecycle, contradiction detection, and an MCP server." />
+<style>
+__BASE_CSS__
+  /* ---- nav ---- */
+  nav {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    width: min(1080px, calc(100% - 28px)); z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.65rem 1.1rem; border-radius: 999px;
+  }
+  .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; color: var(--ink); }
+  .brand b { font-size: 1.02rem; font-weight: 700; letter-spacing: -0.01em; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--accent-grad); box-shadow: 0 6px 18px -6px rgba(86,140,245,0.7);
+  }
+  .navlinks { display: flex; gap: 1.6rem; }
+  .navlinks a { color: var(--muted); text-decoration: none; font: 500 0.88rem var(--sans); transition: color .15s; }
+  .navlinks a:hover { color: var(--ink); }
+  @media (max-width: 760px) { .navlinks { display: none; } }
+
+  main { width: min(1080px, calc(100% - 40px)); margin: 0 auto; }
+
+  /* ---- hero ---- */
+  .hero { padding: 9.5rem 0 4.5rem; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 3rem; align-items: center; }
+  @media (max-width: 900px) { .hero { grid-template-columns: 1fr; padding-top: 8rem; } }
+  .hero h1 {
+    margin: 1.1rem 0 1rem; font-size: clamp(2.3rem, 4.6vw, 3.4rem);
+    line-height: 1.07; letter-spacing: -0.035em; font-weight: 750;
+  }
+  .hero p.lead { color: var(--muted); font-size: 1.08rem; line-height: 1.65; max-width: 34rem; margin: 0 0 1.8rem; }
+  .cta-row { display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--faint); font: 400 0.8rem var(--mono); margin-top: 1.2rem; }
+
+  /* terminal card */
+  .term { padding: 0; overflow: hidden; font: 400 0.82rem/1.65 var(--mono); }
+  .term-bar {
+    display: flex; align-items: center; gap: 0.45rem; padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--stroke); color: var(--faint); font-size: 0.75rem;
+  }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; opacity: 0.85; }
+  .term-body { padding: 1.1rem 1.2rem 1.3rem; overflow-x: auto; white-space: pre; }
+  .c-dim { color: var(--faint); } .c-cmd { color: var(--ink); }
+  .c-key { color: var(--cyan); } .c-str { color: #b8f0a8; } .c-num { color: var(--amber); }
+
+  /* metric strip */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin: 0 0 5rem; }
+  @media (max-width: 820px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+  .metric { padding: 1.15rem 1.3rem; }
+  .metric b { display: block; font-size: 1.35rem; letter-spacing: -0.02em; }
+  .metric span { color: var(--muted); font-size: 0.82rem; }
+
+  /* sections */
+  section { padding: 3.4rem 0; }
+  .sec-head { max-width: 38rem; margin-bottom: 2.4rem; }
+  .eyebrow { font: 600 0.74rem var(--mono); text-transform: uppercase; letter-spacing: 0.16em; color: var(--cyan); }
+  .sec-head h2 { margin: 0.7rem 0 0.7rem; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -0.025em; }
+  .sec-head p { color: var(--muted); line-height: 1.65; margin: 0; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 900px) { .grid3 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 620px) { .grid3 { grid-template-columns: 1fr; } }
+  .card { padding: 1.5rem 1.45rem; transition: transform .2s ease, border-color .2s ease; }
+  .card:hover { transform: translateY(-3px); border-color: var(--stroke-2); }
+  .card .ico {
+    width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+    background: var(--glass-2); border: 1px solid var(--stroke); margin-bottom: 1rem;
+  }
+  .card h3 { margin: 0 0 0.5rem; font-size: 1.02rem; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.89rem; line-height: 1.6; }
+
+  /* architecture */
+  .arch { display: flex; flex-direction: column; gap: 0.7rem; }
+  .layer { display: grid; grid-template-columns: 150px 1fr; gap: 1.2rem; align-items: center; padding: 1.05rem 1.35rem; }
+  @media (max-width: 620px) { .layer { grid-template-columns: 1fr; gap: 0.3rem; } }
+  .layer .tag { font: 600 0.78rem var(--mono); color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; }
+  .layer p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.55; }
+  .layer code { font: 500 0.8rem var(--mono); color: var(--ink); }
+  .arrow { text-align: center; color: var(--faint); font-size: 0.85rem; line-height: 0.5; }
+
+  /* api table */
+  .api-table { width: 100%; border-collapse: collapse; overflow: hidden; }
+  .api-wrap { padding: 0.4rem 0; overflow-x: auto; }
+  .api-table th, .api-table td { text-align: left; padding: 0.78rem 1.2rem; font-size: 0.85rem; }
+  .api-table th { color: var(--faint); font: 600 0.72rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; border-bottom: 1px solid var(--stroke); }
+  .api-table tr + tr td { border-top: 1px solid rgba(255,255,255,0.05); }
+  .api-table td:first-child { font: 600 0.78rem var(--mono); white-space: nowrap; }
+  .api-table td:nth-child(2) { font: 400 0.82rem var(--mono); color: var(--ink); white-space: nowrap; }
+  .api-table td:last-child { color: var(--muted); }
+  .m-get { color: var(--green); } .m-post { color: var(--cyan); } .m-patch { color: var(--amber); } .m-del { color: var(--red); }
+
+  /* CTA + footer */
+  .cta-final { margin: 2rem 0 0; padding: 3.2rem 2rem; text-align: center; }
+  .cta-final h2 { margin: 0 0 0.6rem; font-size: clamp(1.6rem, 3vw, 2.1rem); letter-spacing: -0.025em; }
+  .cta-final p { color: var(--muted); margin: 0 0 1.6rem; }
+  footer {
+    margin: 4rem auto 2rem; width: min(1080px, calc(100% - 40px));
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;
+    color: var(--faint); font-size: 0.82rem; padding-top: 1.6rem; border-top: 1px solid var(--stroke);
+  }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+
+  /* reveal animation */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+</style>
 </head>
 <body>
-<div class="page">
-  <header class="topbar">
-    <a class="brand" href="/"><img class="logo" src="/static/brain.png" alt="" />AegisMem Guided Terminal</a>
-    <div style="display:flex; gap:10px; flex-wrap:wrap">
-      <button class="btn primary" id="sample-btn">Run sample flow</button>
-      <a class="btn" href="/">Back to landing</a>
+<div class="ambient"></div>
+
+<nav class="glass">
+  <a class="brand" href="/">
+    <span class="mark">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z" fill="#061018"/><circle cx="12" cy="11" r="3" fill="#9be8ff"/></svg>
+    </span>
+    <b>stateful.ai</b>
+  </a>
+  <div class="navlinks">
+    <a href="#features">Features</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#api">API</a>
+    <a href="https://github.com/Ajay-quan/stateful.ai" target="_blank" rel="noopener">GitHub</a>
+  </div>
+  <a class="btn btn-primary" href="/demo">Open console</a>
+</nav>
+
+<main>
+  <header class="hero">
+    <div>
+      <span class="pill"><span class="dot"></span> v0.2 &middot; production hardened &middot; MCP ready</span>
+      <h1>Memory infrastructure<br/>for <span class="grad-text">AI agents</span></h1>
+      <p class="lead">A persistent memory layer for long-running agents: hybrid semantic + lexical retrieval, versioned lifecycle, contradiction detection, reflection — exposed over REST and MCP. Zero infrastructure to start, swappable adapters to scale.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/demo">Launch live console</a>
+        <a class="btn btn-ghost" href="#api">API reference</a>
+      </div>
+      <div class="hint">pip install -r requirements.txt &nbsp;&middot;&nbsp; uvicorn apps.api.main:app</div>
+    </div>
+
+    <div class="term glass">
+      <div class="term-bar">
+        <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+        <span style="margin-left:.5rem">stateful_ai — recall</span>
+      </div>
+      <div class="term-body"><span class="c-dim">$</span> <span class="c-cmd">curl -s $BASE/api/v1/retrieve \
+   -H <span class="c-str">"X-API-Key: $KEY"</span> \
+   -d <span class="c-str">'{"user_id":"alice","query":"vector db preference"}'</span></span>
+
+<span class="c-dim">{</span>
+  <span class="c-key">"results"</span><span class="c-dim">: [{</span>
+    <span class="c-key">"content"</span><span class="c-dim">:</span> <span class="c-str">"Alice prefers FAISS for local search"</span><span class="c-dim">,</span>
+    <span class="c-key">"score"</span><span class="c-dim">:</span> <span class="c-num">0.914</span><span class="c-dim">,</span>
+    <span class="c-key">"signals"</span><span class="c-dim">: {</span> <span class="c-key">"semantic"</span><span class="c-dim">:</span> <span class="c-num">0.88</span><span class="c-dim">,</span> <span class="c-key">"bm25"</span><span class="c-dim">:</span> <span class="c-num">0.79</span><span class="c-dim">,</span> <span class="c-key">"recency"</span><span class="c-dim">:</span> <span class="c-num">0.97</span> <span class="c-dim">}</span>
+  <span class="c-dim">}],</span>
+  <span class="c-key">"total_found"</span><span class="c-dim">:</span> <span class="c-num">1</span>
+<span class="c-dim">}</span></div>
     </div>
   </header>
-  <section class="hero">
-    <div>
-      <h1>Type once. Watch the agent remember.</h1>
-      <p class="lede">This demo shows the actual AegisMem lifecycle. Run the sample flow or type into the terminal: user name, memory, then a later question.</p>
+
+  <div class="metrics reveal">
+    <div class="metric glass"><b class="grad-text">Hybrid</b><span>dense + BM25 fused with RRF</span></div>
+    <div class="metric glass"><b class="grad-text">Versioned</b><span>full lifecycle &amp; audit trail</span></div>
+    <div class="metric glass"><b class="grad-text">Zero-infra</b><span>boots with no external services</span></div>
+    <div class="metric glass"><b class="grad-text">4 tools</b><span>remember &middot; recall &middot; forget &middot; list</span></div>
+  </div>
+
+  <section id="features">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Capabilities</span>
+      <h2>Everything an agent needs to remember</h2>
+      <p>Chat history is not memory. stateful.ai stores observations, retrieves the right context, keeps facts current, and tells you when they conflict.</p>
     </div>
-    <div class="scoreboard">
-      <div class="score"><strong id="score">0</strong><span>memory score</span></div>
-      <div class="score"><strong id="latency">--</strong><span>last call</span></div>
-      <div class="score"><strong id="phase-label">1/4</strong><span>step</span></div>
+    <div class="grid3">
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38d4f5" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+        <h3>Hybrid retrieval</h3>
+        <p>Dense vectors for meaning, BM25 for names and identifiers, Reciprocal Rank Fusion to merge rankings, plus recency, importance, and access signals.</p>
+      </div>
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c8cf8" stroke-width="1.8"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg></div>
+        <h3>Versioned lifecycle</h3>
+        <p>Every update produces a new version with full history. Supersede, soft-delete, and audit any memory — nothing is silently overwritten.</p>
+      </div>
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="1.8"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg></div>
+        <h3>Contradiction detection</h3>
+        <p>New observations are scanned against prior facts. Conflicts are reported with confidence scores and penalized during ranking until resolved.</p>
+      </div>
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8"><path d="M12 2a7 7 0 017 7c0 2.4-1.2 4.4-3 5.7V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.3C6.2 13.4 5 11.4 5 9a7 7 0 017-7z"/><path d="M9 21h6"/></svg></div>
+        <h3>Reflection</h3>
+        <p>Periodically distills clusters of related observations into higher-level insights, keeping the store dense with meaning instead of noise.</p>
+      </div>
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+        <h3>MCP server</h3>
+        <p>Exposes <code style="font-family:var(--mono);font-size:.82em">remember</code>, <code style="font-family:var(--mono);font-size:.82em">recall</code>, <code style="font-family:var(--mono);font-size:.82em">forget</code>, and <code style="font-family:var(--mono);font-size:.82em">list_memories</code> so any MCP-capable tool shares one memory.</p>
+      </div>
+      <div class="card glass reveal">
+        <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38d4f5" stroke-width="1.8"><path d="M3 17l5-5 4 4 8-8"/><path d="M14 7h7v7"/></svg></div>
+        <h3>Production observability</h3>
+        <p>Prometheus metrics, structured request logs with request IDs, liveness and readiness probes, API-key auth, and per-client rate limiting.</p>
+      </div>
     </div>
   </section>
-  <main class="demo-grid">
-    <section class="terminal">
-      <div class="head"><div class="traffic"><span></span><span></span><span></span></div><span id="status">ready</span></div>
-      <div class="terminal-screen" id="terminal"></div>
-      <form class="input-row" id="terminal-form"><span class="prompt">&gt;</span><input id="terminal-input" autocomplete="off" /></form>
-    </section>
-    <aside class="side">
-      <div class="head"><span>What is happening?</span><span>simple mode</span></div>
-      <div class="side-body">
-        <div class="guide-card"><h3 id="guide-title">Start with a user.</h3><p id="guide-copy">The terminal will ask one question at a time. Press Enter after each answer.</p></div>
-        <div class="lifecycle" aria-label="AegisMem lifecycle">
-          <div class="life-node active" id="l-capture"><b>Capture</b><span>Collect user/project context</span></div>
-          <div class="life-node" id="l-store"><b>Store</b><span>POST /api/v1/memories</span></div>
-          <div class="life-node" id="l-retrieve"><b>Retrieve</b><span>POST /api/v1/retrieve</span></div>
-          <div class="life-node" id="l-respond"><b>Respond</b><span>Return context to the agent</span></div>
-        </div>
-        <div class="step-list">
-          <div class="step active" id="s-user">1. Choose a user</div>
-          <div class="step" id="s-memory">2. Store useful memory</div>
-          <div class="step" id="s-question">3. Ask a later question</div>
-          <div class="step" id="s-result">4. See recalled context</div>
-        </div>
-        <div class="guide-card"><h3>Fast examples</h3><div class="quick"><button data-fill="Alice">Alice</button><button data-fill="Alice prefers concise STAR interview answers.">STAR answers</button><button data-fill="How should Alice answer interview questions?">Interview question</button></div></div>
+
+  <section id="architecture">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Architecture</span>
+      <h2>Clean layers, swappable adapters</h2>
+      <p>Run it with zero infrastructure today; point the same code at Postgres, Qdrant, and Neo4j tomorrow. No layer reaches around another.</p>
+    </div>
+    <div class="arch reveal">
+      <div class="layer glass">
+        <span class="tag">API</span>
+        <p>FastAPI service &amp; MCP server — auth, rate limits, validation, OpenAPI. <code>apps/api</code> &middot; <code>integrations/mcp_server.py</code></p>
       </div>
-    </aside>
-  </main>
-</div>
+      <div class="arrow">&#8595;</div>
+      <div class="layer glass">
+        <span class="tag">Services</span>
+        <p>Ingestion, retrieval, update, reflection, contradiction, consolidation. <code>services/</code></p>
+      </div>
+      <div class="arrow">&#8595;</div>
+      <div class="layer glass">
+        <span class="tag">Domain</span>
+        <p>Scoring, BM25, RRF fusion, reranking, relevance — pure logic, no I/O. <code>domain/</code></p>
+      </div>
+      <div class="arrow">&#8595;</div>
+      <div class="layer glass">
+        <span class="tag">Adapters</span>
+        <p>Relational (memory / JSON / Postgres) &middot; vectors (FAISS / Qdrant / Chroma) &middot; graph (Neo4j) &middot; embeddings &middot; LLMs. <code>adapters/</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="api">
+    <div class="sec-head reveal">
+      <span class="eyebrow">API</span>
+      <h2>A small, sharp surface</h2>
+      <p>Everything below is live on this deployment — try it in the <a href="/demo" style="color:var(--cyan);text-decoration:none">console</a>.</p>
+    </div>
+    <div class="api-wrap glass reveal">
+      <table class="api-table">
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td class="m-post">POST</td><td>/api/v1/memories</td><td>Ingest a memory (content, tags, importance, relations)</td></tr>
+          <tr><td class="m-post">POST</td><td>/api/v1/retrieve</td><td>Hybrid semantic search over a user's memories</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/memories?user_id=…</td><td>List memories for a user</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/memories/{id}</td><td>Fetch a single memory</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/memories/{id}/versions</td><td>Full version history</td></tr>
+          <tr><td class="m-patch">PATCH</td><td>/api/v1/memories/{id}</td><td>Update content, tags, metadata, importance</td></tr>
+          <tr><td class="m-del">DELETE</td><td>/api/v1/memories/{id}</td><td>Soft-delete a memory</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/graph/{id}</td><td>Traverse related memories</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/stats</td><td>Aggregate store statistics</td></tr>
+          <tr><td class="m-get">GET</td><td>/api/v1/export</td><td>Export the full store as JSON</td></tr>
+          <tr><td class="m-post">POST</td><td>/api/v1/import</td><td>Import a previously exported store</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="cta-final glass reveal">
+    <h2>Give your agents a <span class="grad-text">memory</span></h2>
+    <p>Boot it locally in under a minute. No database, no API keys, no model downloads.</p>
+    <div class="cta-row" style="justify-content:center">
+      <a class="btn btn-primary" href="/demo">Open the console</a>
+      <a class="btn btn-ghost" href="https://github.com/Ajay-quan/stateful.ai" target="_blank" rel="noopener">View source</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>&copy; 2026 stateful.ai &middot; persistent memory for LLM agents</span>
+  <span><a href="/health">status</a> &nbsp;&middot;&nbsp; <a href="https://github.com/Ajay-quan/stateful.ai" target="_blank" rel="noopener">github</a></span>
+</footer>
+
 <script>
-const apiKey = localStorage.getItem("aegismem_api_key") || "";
-const terminal = document.getElementById("terminal");
-const input = document.getElementById("terminal-input");
-const state = { phase: "user", user: "", memory: "", memoryId: "", query: "", score: 0 };
-function headers() { const h = {"Content-Type": "application/json"}; if (apiKey) h["X-API-Key"] = apiKey; return h; }
-function stamp() { return new Date().toLocaleTimeString([], { hour12: false }); }
-function escapeHtml(text) { return String(text).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
-function line(kind, text) {
-  const row = document.createElement("div");
-  row.className = "line";
-  row.innerHTML = `<span class="time">${stamp()}</span><span class="${kind}">${escapeHtml(text)}</span>`;
-  terminal.appendChild(row);
-  terminal.scrollTop = terminal.scrollHeight;
-}
-function setStatus(text) { document.getElementById("status").textContent = text; }
-function setGuide(title, copy, placeholder) {
-  document.getElementById("guide-title").textContent = title;
-  document.getElementById("guide-copy").textContent = copy;
-  input.placeholder = placeholder;
-  input.focus();
-}
-function setStep(active) {
-  const order = ["user", "memory", "question", "result"];
-  order.forEach((name, index) => {
-    const el = document.getElementById(`s-${name}`);
-    el.className = `step ${name === active ? "active" : order.indexOf(active) > index ? "done" : ""}`;
-  });
-  const lifecycle = {
-    user: "capture",
-    memory: "store",
-    question: "retrieve",
-    result: "respond"
-  };
-  const lifeOrder = ["capture", "store", "retrieve", "respond"];
-  const activeLife = lifecycle[active];
-  lifeOrder.forEach((name, index) => {
-    const el = document.getElementById(`l-${name}`);
-    el.className = `life-node ${name === activeLife ? "active" : lifeOrder.indexOf(activeLife) > index ? "done" : ""}`;
-  });
-  document.getElementById("phase-label").textContent = `${order.indexOf(active) + 1}/4`;
-}
-async function request(path, options = {}) {
-  const started = performance.now();
-  setStatus("calling api");
-  const res = await fetch(path, options);
-  const data = await res.json();
-  document.getElementById("latency").textContent = `${Math.round(performance.now() - started)}ms`;
-  setStatus(res.ok ? "ready" : "error");
-  if (!res.ok) line("err", `API error: ${data.error?.message || res.statusText}`);
-  return data;
-}
-function boot() {
-  terminal.innerHTML = "";
-  line("sys", "AegisMem terminal started.");
-  line("sys", "We will store one memory, then ask a later question.");
-  line("ok", "What user should the agent remember? Try: Alice");
-  line("warn", "Shortcut: type sample or click Run sample flow.");
-  setGuide("Start with a user.", "Give the agent a user name. This keeps memory scoped and easy to understand.", "Type a user name, e.g. Alice");
-  setStep("user");
-}
-async function handle(value) {
-  if (!value) return;
-  line("user", `> ${value}`);
-  input.value = "";
-  if (value.toLowerCase() === "sample") { runSample(); return; }
-  if (value.toLowerCase() === "restart") { state.phase = "user"; state.score = 0; document.getElementById("score").textContent = "0"; boot(); return; }
-  if (state.phase === "user") {
-    state.user = value;
-    state.phase = "memory";
-    line("ok", `User set to ${state.user}.`);
-    line("sys", "Now type one useful thing the agent should remember.");
-    setGuide("Store a useful memory.", "Write one practical preference, project fact, or decision. AegisMem will persist it through the API.", "Example: Alice prefers concise STAR interview answers.");
-    setStep("memory");
-    return;
-  }
-  if (state.phase === "memory") {
-    state.memory = value;
-    line("sys", "Saving memory through POST /api/v1/memories...");
-    const data = await request("/api/v1/memories", { method: "POST", headers: headers(), body: JSON.stringify({ user_id: state.user, key: "guided-demo", content: state.memory, importance_score: 0.9 }) });
-    if (data.memory) {
-      state.memoryId = data.memory.memory_id;
-      state.phase = "question";
-      state.score = 50;
-      document.getElementById("score").textContent = state.score;
-      line("ok", "Memory saved. The agent can retrieve it later instead of asking again.");
-      line("sys", "Ask a later question where that memory would help.");
-      setGuide("Ask a later question.", "Pretend this is a new session. Ask something where the saved memory should help the agent respond.", "Example: How should Alice answer interview questions?");
-      setStep("question");
-    }
-    return;
-  }
-  if (state.phase === "question") {
-    state.query = value;
-    line("sys", "Retrieving relevant memory through POST /api/v1/retrieve...");
-    const data = await request("/api/v1/retrieve", { method: "POST", headers: headers(), body: JSON.stringify({ user_id: state.user, query: state.query, top_k: 3 }) });
-    const top = data.results?.[0];
-    state.phase = "result";
-    state.score = top ? 100 : 60;
-    document.getElementById("score").textContent = state.score;
-    line("ok", top ? `AegisMem recalled: ${top.content}` : "No exact match returned, but the flow completed.");
-    line("sys", top ? "Agent response: I used the saved memory instead of asking the user to repeat it." : "Try a question closer to the memory you stored.");
-    line("ok", "Type restart to run the demo again.");
-    setGuide("That is persistent memory.", "The important detail was saved once, then retrieved later for a better response. Type restart to try another example.", "Type restart to run again");
-    setStep("result");
-  }
-}
-document.getElementById("terminal-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  handle(input.value.trim());
-});
-function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function runSample() {
-  if (state.phase !== "user") {
-    state.phase = "user";
-    state.score = 0;
-    document.getElementById("score").textContent = "0";
-    boot();
-    await wait(250);
-  }
-  await handle("Alice");
-  await wait(650);
-  await handle("Alice prefers concise STAR interview answers with measurable impact.");
-  await wait(850);
-  await handle("How should Alice answer interview practice questions?");
-}
-document.getElementById("sample-btn").addEventListener("click", runSample);
-document.querySelectorAll("[data-fill]").forEach((button) => button.addEventListener("click", () => {
-  input.value = button.dataset.fill;
-  input.focus();
-}));
-boot();
+  const io = new IntersectionObserver(
+    entries => entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }),
+    { threshold: 0.12 }
+  );
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 </script>
 </body>
 </html>
-"""
+""".replace("__BASE_CSS__", _BASE_CSS)
+
+# ---------------------------------------------------------------------------
+# Live operations console
+# ---------------------------------------------------------------------------
+
+DEMO_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stateful.ai Console</title>
+<meta name="description" content="Live operations console for the stateful.ai memory service." />
+<style>
+__BASE_CSS__
+  body { padding-bottom: 4rem; }
+  .wrap { width: min(1180px, calc(100% - 36px)); margin: 0 auto; }
+
+  /* top bar */
+  .topbar {
+    position: sticky; top: 14px; z-index: 40;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    padding: 0.7rem 1.1rem; margin: 14px auto 1.6rem; border-radius: 999px;
+  }
+  .brand { display: flex; align-items: center; gap: 0.55rem; text-decoration: none; color: var(--ink); margin-right: auto; }
+  .brand b { font-weight: 700; }
+  .mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-grad); }
+  .keybox { display: flex; align-items: center; gap: 0.5rem; }
+  .keybox input {
+    width: 180px; padding: 0.5rem 0.85rem; border-radius: 999px;
+    background: rgba(0,0,0,0.25); border: 1px solid var(--stroke);
+    color: var(--ink); font: 400 0.8rem var(--mono); outline: none;
+  }
+  .keybox input:focus { border-color: var(--indigo); }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.9rem; margin-bottom: 1.6rem; }
+  @media (max-width: 980px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 620px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi { padding: 1.1rem 1.25rem; }
+  .kpi label { display: block; color: var(--muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.45rem; }
+  .kpi b { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.02em; }
+  .kpi small { color: var(--faint); font-size: 0.72rem; display: block; margin-top: 0.3rem; }
+
+  /* layout */
+  .cols { display: grid; grid-template-columns: 420px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 980px) { .cols { grid-template-columns: 1fr; } }
+  .panel { padding: 1.4rem 1.45rem; margin-bottom: 1rem; }
+  .panel h2 { margin: 0 0 1.1rem; font-size: 1.0rem; letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.55rem; }
+  .panel h2 .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--glass-2); border: 1px solid var(--stroke); }
+
+  label.f { display: block; color: var(--muted); font-size: 0.76rem; margin: 0.85rem 0 0.35rem; letter-spacing: 0.03em; }
+  input.f, textarea.f, select.f {
+    width: 100%; padding: 0.62rem 0.8rem; border-radius: var(--radius-sm);
+    background: rgba(0,0,0,0.25); border: 1px solid var(--stroke);
+    color: var(--ink); font: 400 0.88rem var(--sans); outline: none;
+    transition: border-color .15s;
+  }
+  textarea.f { min-height: 86px; resize: vertical; font-family: var(--sans); }
+  input.f:focus, textarea.f:focus { border-color: var(--indigo); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+  .range-row { display: flex; align-items: center; gap: 0.8rem; }
+  input[type=range] { flex: 1; accent-color: #7c8cf8; }
+  .range-val { font: 600 0.85rem var(--mono); color: var(--cyan); min-width: 2.6rem; text-align: right; }
+  .panel .btn { margin-top: 1.15rem; width: 100%; justify-content: center; }
+
+  /* results */
+  .result { padding: 0.95rem 1.05rem; border: 1px solid var(--stroke); border-radius: var(--radius-sm); background: rgba(0,0,0,0.18); margin-bottom: 0.7rem; }
+  .result .top { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+  .result .content { font-size: 0.92rem; line-height: 1.5; }
+  .score { font: 700 0.82rem var(--mono); color: var(--cyan); white-space: nowrap; }
+  .scorebar { height: 4px; border-radius: 99px; background: rgba(255,255,255,0.08); margin-top: 0.65rem; overflow: hidden; }
+  .scorebar i { display: block; height: 100%; border-radius: 99px; background: var(--accent-grad); }
+  .meta { color: var(--faint); font: 400 0.72rem var(--mono); margin-top: 0.5rem; display: flex; gap: 0.9rem; flex-wrap: wrap; }
+
+  /* memory table */
+  table.mem { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.mem th { text-align: left; color: var(--faint); font: 600 0.7rem var(--mono); text-transform: uppercase; letter-spacing: 0.1em; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--stroke); }
+  table.mem td { padding: 0.65rem 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; }
+  table.mem tr:hover td { background: rgba(255,255,255,0.025); }
+  .mono { font: 400 0.75rem var(--mono); color: var(--muted); }
+  .tag-chip { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 99px; background: rgba(124,140,248,0.14); border: 1px solid rgba(124,140,248,0.3); color: #b9c3ff; font-size: 0.7rem; margin: 0 0.25rem 0.25rem 0; }
+  .iconbtn {
+    background: none; border: 1px solid var(--stroke); border-radius: 8px; color: var(--muted);
+    cursor: pointer; padding: 0.28rem 0.55rem; font-size: 0.72rem; font-family: var(--mono);
+    transition: color .15s, border-color .15s;
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--stroke-2); }
+  .iconbtn.danger:hover { color: var(--red); border-color: rgba(248,113,113,0.5); }
+  .table-tools { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.9rem; flex-wrap: wrap; }
+  .table-tools input { flex: 1; min-width: 160px; }
+  .empty { color: var(--faint); text-align: center; padding: 2.2rem 1rem; font-size: 0.88rem; }
+
+  /* modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(3,4,9,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-bg.open { display: flex; }
+  .modal { width: min(640px, calc(100% - 32px)); max-height: 80vh; overflow: auto; padding: 1.5rem 1.6rem; }
+  .modal h3 { margin: 0 0 1rem; }
+  .ver { border-left: 2px solid var(--indigo); padding: 0.5rem 0.9rem; margin-bottom: 0.8rem; }
+  .ver .when { color: var(--faint); font: 400 0.72rem var(--mono); }
+
+  /* toasts */
+  #toasts { position: fixed; bottom: 22px; right: 22px; display: flex; flex-direction: column; gap: 0.6rem; z-index: 200; }
+  .toast {
+    padding: 0.8rem 1.15rem; border-radius: var(--radius-sm); font-size: 0.86rem;
+    background: rgba(20,24,38,0.85); border: 1px solid var(--stroke-2);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: var(--shadow);
+    animation: slidein .25s ease;
+  }
+  .toast.ok { border-left: 3px solid var(--green); }
+  .toast.err { border-left: 3px solid var(--red); }
+  @keyframes slidein { from { opacity: 0; transform: translateY(8px); } }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--cyan); border-radius: 50%; animation: rot 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="ambient"></div>
+
+<div class="wrap">
+  <div class="topbar glass">
+    <a class="brand" href="/">
+      <span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z" fill="#061018"/><circle cx="12" cy="11" r="3" fill="#9be8ff"/></svg></span>
+      <b>stateful.ai</b> <span style="color:var(--faint);font-size:.8rem">console</span>
+    </a>
+    <span class="pill" id="env-pill"><span class="dot" id="env-dot" style="background:var(--amber);box-shadow:0 0 10px var(--amber)"></span><span id="env-text">connecting…</span></span>
+    <div class="keybox">
+      <input id="api-key" type="password" placeholder="API key (if required)" autocomplete="off" />
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis">
+    <div class="kpi glass"><label>Memories</label><b id="k-total">–</b><small id="k-active"></small></div>
+    <div class="kpi glass"><label>Users</label><b id="k-users">–</b><small>distinct user_ids</small></div>
+    <div class="kpi glass"><label>Avg importance</label><b id="k-imp">–</b><small>active memories</small></div>
+    <div class="kpi glass"><label>Versions</label><b id="k-versions">–</b><small>total revisions</small></div>
+    <div class="kpi glass"><label>Recalls</label><b id="k-access">–</b><small>total access count</small></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="panel glass">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>Ingest memory</h2>
+        <label class="f" for="in-user">User ID</label>
+        <input class="f" id="in-user" value="alice" />
+        <label class="f" for="in-content">Content</label>
+        <textarea class="f" id="in-content" placeholder="Alice prefers FAISS for local vector search…"></textarea>
+        <div class="row2">
+          <div>
+            <label class="f" for="in-key">Key <span style="color:var(--faint)">(optional)</span></label>
+            <input class="f" id="in-key" placeholder="pref:vector-db" />
+          </div>
+          <div>
+            <label class="f" for="in-tags">Tags <span style="color:var(--faint)">(comma sep.)</span></label>
+            <input class="f" id="in-tags" placeholder="preference, infra" />
+          </div>
+        </div>
+        <label class="f">Importance</label>
+        <div class="range-row">
+          <input type="range" id="in-imp" min="0" max="1" step="0.05" value="0.5" />
+          <span class="range-val" id="in-imp-val">0.50</span>
+        </div>
+        <button class="btn btn-primary" id="btn-ingest">Store memory</button>
+      </div>
+
+      <div class="panel glass">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38d4f5" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>Semantic recall</h2>
+        <label class="f" for="q-user">User ID</label>
+        <input class="f" id="q-user" value="alice" />
+        <label class="f" for="q-query">Query</label>
+        <input class="f" id="q-query" placeholder="what vector database does alice like?" />
+        <div class="row2">
+          <div>
+            <label class="f" for="q-topk">Top K</label>
+            <input class="f" id="q-topk" type="number" min="1" max="50" value="5" />
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-ghost" id="btn-search" style="margin-top:0">Search</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel glass">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M3 17l5-5 4 4 8-8"/></svg></span>Results</h2>
+        <div id="results"><div class="empty">Run a search to see ranked recall results.</div></div>
+      </div>
+
+      <div class="panel glass">
+        <h2><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c8cf8" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span>Memory store</h2>
+        <div class="table-tools">
+          <input class="f" id="ls-user" value="alice" placeholder="user_id" />
+          <button class="btn btn-ghost" id="btn-list" style="margin:0;width:auto">Refresh</button>
+          <button class="iconbtn" id="btn-export">⤓ export</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="mem">
+            <thead><tr><th>Content</th><th>Tags</th><th>Imp.</th><th>v</th><th>Updated</th><th></th></tr></thead>
+            <tbody id="mem-rows"><tr><td colspan="6" class="empty">No memories loaded — press Refresh.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-bg">
+  <div class="modal glass">
+    <h3>Version history</h3>
+    <div id="modal-body"></div>
+    <button class="btn btn-ghost" onclick="document.getElementById('modal-bg').classList.remove('open')" style="width:auto;margin-top:1rem">Close</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  function headers() {
+    const h = { "Content-Type": "application/json" };
+    const key = $("api-key").value.trim();
+    if (key) h["X-API-Key"] = key;
+    return h;
+  }
+
+  async function api(path, options = {}) {
+    const resp = await fetch(path, { headers: headers(), ...options });
+    let body = null;
+    try { body = await resp.json(); } catch (_) { /* no body */ }
+    if (!resp.ok) {
+      const message = body && body.error ? body.error.message : `HTTP ${resp.status}`;
+      throw new Error(message);
+    }
+    return body;
+  }
+
+  function toast(message, kind = "ok") {
+    const el = document.createElement("div");
+    el.className = `toast ${kind}`;
+    el.textContent = message;
+    $("toasts").appendChild(el);
+    setTimeout(() => el.remove(), 3800);
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "–";
+    const d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // --- health + stats ------------------------------------------------
+  async function refreshHealth() {
+    try {
+      const h = await api("/health");
+      $("env-dot").style.background = "var(--green)";
+      $("env-dot").style.boxShadow = "0 0 10px var(--green)";
+      $("env-text").textContent = `online · ${h.vector_store || "memory"} · auth ${h.auth_enabled ? "on" : "off"}`;
+    } catch (e) {
+      $("env-dot").style.background = "var(--red)";
+      $("env-dot").style.boxShadow = "0 0 10px var(--red)";
+      $("env-text").textContent = "offline";
+    }
+  }
+
+  async function refreshStats() {
+    try {
+      const s = await api("/api/v1/stats");
+      $("k-total").textContent = s.total_memories;
+      $("k-active").textContent = `${s.active_memories} active · ${s.deleted_memories} deleted`;
+      $("k-users").textContent = s.users;
+      $("k-imp").textContent = s.avg_importance.toFixed(2);
+      $("k-versions").textContent = s.total_versions;
+      $("k-access").textContent = s.total_access_count;
+    } catch (e) { /* stats need a key when auth is on; stay quiet */ }
+  }
+
+  // --- ingest ---------------------------------------------------------
+  $("in-imp").addEventListener("input", () => {
+    $("in-imp-val").textContent = Number($("in-imp").value).toFixed(2);
+  });
+
+  $("btn-ingest").addEventListener("click", async () => {
+    const content = $("in-content").value.trim();
+    const userId = $("in-user").value.trim();
+    if (!content || !userId) return toast("user_id and content are required", "err");
+    const tags = $("in-tags").value.split(",").map((t) => t.trim()).filter(Boolean);
+    const btn = $("btn-ingest");
+    btn.innerHTML = '<span class="spin"></span>&nbsp;Storing…';
+    try {
+      const payload = {
+        user_id: userId,
+        content,
+        tags,
+        importance_score: Number($("in-imp").value),
+      };
+      const key = $("in-key").value.trim();
+      if (key) payload.key = key;
+      await api("/api/v1/memories", { method: "POST", body: JSON.stringify(payload) });
+      toast("Memory stored");
+      $("in-content").value = "";
+      refreshStats();
+      if ($("ls-user").value.trim() === userId) listMemories();
+    } catch (e) { toast(e.message, "err"); }
+    btn.textContent = "Store memory";
+  });
+
+  // --- search ---------------------------------------------------------
+  $("btn-search").addEventListener("click", runSearch);
+  $("q-query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+
+  async function runSearch() {
+    const query = $("q-query").value.trim();
+    const userId = $("q-user").value.trim();
+    if (!query || !userId) return toast("user_id and query are required", "err");
+    $("results").innerHTML = '<div class="empty"><span class="spin"></span>&nbsp;Searching…</div>';
+    try {
+      const data = await api("/api/v1/retrieve", {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, query, top_k: Number($("q-topk").value) || 5 }),
+      });
+      renderResults(data.results || []);
+    } catch (e) {
+      $("results").innerHTML = '<div class="empty">Search failed.</div>';
+      toast(e.message, "err");
+    }
+  }
+
+  function renderResults(results) {
+    if (!results.length) {
+      $("results").innerHTML = '<div class="empty">No matches for this query.</div>';
+      return;
+    }
+    $("results").innerHTML = results.map((r) => {
+      const memory = r.memory || r;
+      const rawScore = typeof r.score === "number" ? r.score : (r.similarity ?? 0);
+      const pct = Math.max(2, Math.min(100, Math.round(rawScore * 100)));
+      const imp = typeof memory.importance_score === "number" ? memory.importance_score.toFixed(2) : "–";
+      return `<div class="result">
+        <div class="top">
+          <div class="content">${esc(memory.content || "")}</div>
+          <span class="score">${rawScore.toFixed(3)}</span>
+        </div>
+        <div class="scorebar"><i style="width:${pct}%"></i></div>
+        <div class="meta">
+          <span>id ${esc(String(memory.memory_id || "").slice(0, 8))}</span>
+          <span>v${esc(memory.version ?? 1)}</span>
+          <span>imp ${esc(imp)}</span>
+          <span>${esc(fmtDate(memory.updated_at))}</span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  // --- list / manage ---------------------------------------------------
+  $("btn-list").addEventListener("click", listMemories);
+
+  async function listMemories() {
+    const userId = $("ls-user").value.trim();
+    if (!userId) return toast("user_id is required", "err");
+    const rows = $("mem-rows");
+    rows.innerHTML = '<tr><td colspan="6" class="empty"><span class="spin"></span>&nbsp;Loading…</td></tr>';
+    try {
+      const data = await api(`/api/v1/memories?user_id=${encodeURIComponent(userId)}`);
+      const memories = data.memories || [];
+      if (!memories.length) {
+        rows.innerHTML = '<tr><td colspan="6" class="empty">No memories for this user yet.</td></tr>';
+        return;
+      }
+      rows.innerHTML = memories.map((m) => `<tr>
+        <td style="max-width:340px">${esc(m.content)}<div class="mono">${esc(m.memory_id.slice(0, 12))}</div></td>
+        <td>${(m.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || '<span class="mono">–</span>'}</td>
+        <td class="mono">${Number(m.importance_score).toFixed(2)}</td>
+        <td class="mono">v${m.version}</td>
+        <td class="mono">${esc(fmtDate(m.updated_at))}</td>
+        <td style="white-space:nowrap">
+          <button class="iconbtn" data-act="versions" data-id="${esc(m.memory_id)}">history</button>
+          <button class="iconbtn danger" data-act="delete" data-id="${esc(m.memory_id)}">delete</button>
+        </td>
+      </tr>`).join("");
+    } catch (e) {
+      rows.innerHTML = '<tr><td colspan="6" class="empty">Failed to load.</td></tr>';
+      toast(e.message, "err");
+    }
+  }
+
+  $("mem-rows").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (btn.dataset.act === "delete") {
+      if (!confirm("Soft-delete this memory?")) return;
+      try {
+        await api(`/api/v1/memories/${encodeURIComponent(id)}`, { method: "DELETE" });
+        toast("Memory deleted");
+        listMemories();
+        refreshStats();
+      } catch (err) { toast(err.message, "err"); }
+    } else if (btn.dataset.act === "versions") {
+      try {
+        const data = await api(`/api/v1/memories/${encodeURIComponent(id)}/versions`);
+        $("modal-body").innerHTML = (data.versions || []).map((v) => `
+          <div class="ver">
+            <div class="when">v${esc(v.version)} · ${esc(fmtDate(v.updated_at || v.created_at))}</div>
+            <div>${esc(v.content)}</div>
+          </div>`).join("") || '<div class="empty">No versions recorded.</div>';
+        $("modal-bg").classList.add("open");
+      } catch (err) { toast(err.message, "err"); }
+    }
+  });
+
+  $("modal-bg").addEventListener("click", (e) => {
+    if (e.target === $("modal-bg")) $("modal-bg").classList.remove("open");
+  });
+
+  $("btn-export").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/v1/export");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "stateful_ai-export.json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("Export downloaded");
+    } catch (e) { toast(e.message, "err"); }
+  });
+
+  // boot
+  refreshHealth();
+  refreshStats();
+  setInterval(refreshHealth, 30000);
+})();
+</script>
+</body>
+</html>
+""".replace("__BASE_CSS__", _BASE_CSS)

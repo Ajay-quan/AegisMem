@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from apps.api.dependencies import (
     get_ingest_service, get_retrieve_service, get_update_service,
     get_reflect_service, get_contradiction_service, get_db_store,
+    get_feedback_service,
 )
 from apps.api.schemas import (
     IngestRequest, IngestResponse, BatchIngestRequest, BatchIngestResponse,
@@ -17,6 +18,8 @@ from apps.api.schemas import (
     UpdateRequest, UpdateResponse,
     ReflectRequest, ReflectResponse,
     ContradictionScanRequest, ContradictionScanResponse, ContradictionListResponse,
+    StatsResponse,
+    FeedbackRequest, FeedbackResponse, LearningStatsResponse,
 )
 from core.schemas.memory import Observation, SourceType, RetrievalQuery
 from core.exceptions import MemoryNotFoundError
@@ -149,6 +152,66 @@ async def retrieve_memories(
         total_found=result.total_found,
         latency_ms=result.latency_ms,
         context_window=context,
+        query_id=result.query_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feedback / continual learning (Stateful-CL)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(
+    request: FeedbackRequest,
+    svc=Depends(get_feedback_service),
+):
+    """Report whether a retrieved memory was useful, driving online learning.
+
+    Echo the ``query_id`` from a prior /retrieve response plus the ``memory_id``
+    being judged. When continual learning is enabled this shapes a reward and
+    updates the per-namespace ranking policy; otherwise it is a safe no-op.
+    """
+    result = await svc.record(
+        query_id=request.query_id,
+        memory_id=request.memory_id,
+        useful=request.useful,
+        score=request.score,
+        outcome=request.outcome,
+    )
+    return FeedbackResponse(
+        recorded=result.recorded,
+        reward=result.reward,
+        namespace=result.namespace,
+        policy_updates=result.policy_updates,
+        weights=result.weights,
+        message=result.message,
+    )
+
+
+@router.get("/audit")
+async def audit_log(limit: int = 100):
+    """Recent mutating operations with the principal that performed them.
+
+    Auth-protected (lives under /api/). Newest first. Bounded ring buffer; wire
+    to a durable sink for long-term retention in production.
+    """
+    from core.security.audit import get_audit_log
+    log = get_audit_log()
+    return {"total": len(log), "entries": log.list(limit=limit)}
+
+
+@router.get("/learning/stats", response_model=LearningStatsResponse)
+async def learning_stats():
+    """Inspect the continual-learning state: replay buffer + policy per namespace."""
+    from core.config.settings import settings as _settings
+    if not _settings.continual_learning_enabled:
+        return LearningStatsResponse(enabled=False, replay={}, policy={})
+    from domain.learning.registry import get_ranking_policy, get_replay_buffer
+    return LearningStatsResponse(
+        enabled=True,
+        replay=get_replay_buffer().stats(),
+        policy=get_ranking_policy().stats(),
     )
 
 
@@ -321,3 +384,53 @@ async def list_contradictions(resolved: bool = False, db=Depends(get_db_store)):
     """List all detected contradictions."""
     contradictions = await db.list_contradictions(resolved=resolved)
     return ContradictionListResponse(contradictions=contradictions, total=len(contradictions))
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def memory_stats(user_id: str, namespace: str = "", db=Depends(get_db_store)):
+    """Aggregate statistics for a user's memory store.
+
+    Powers operational dashboards: counts by type and status, importance
+    distribution, access totals, and unresolved contradiction count.
+    """
+    memories = await db.list_memories(
+        user_id=user_id, namespace=namespace, status="", limit=10_000, offset=0,
+    )
+    by_type: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    namespaces: set[str] = set()
+    total_access = 0
+    importance_sum = 0.0
+    last_at = ""
+    for m in memories:
+        mtype = m.memory_type if isinstance(m.memory_type, str) else m.memory_type.value
+        mstatus = m.status if isinstance(m.status, str) else m.status.value
+        by_type[mtype] = by_type.get(mtype, 0) + 1
+        by_status[mstatus] = by_status.get(mstatus, 0) + 1
+        namespaces.add(m.namespace)
+        total_access += m.access_count
+        importance_sum += m.importance_score
+        created = m.created_at.isoformat() if hasattr(m.created_at, "isoformat") else str(m.created_at)
+        last_at = max(last_at, created)
+
+    try:
+        contradictions = await db.list_contradictions(resolved=False)
+    except Exception:
+        contradictions = []
+
+    return StatsResponse(
+        user_id=user_id,
+        total_memories=len(memories),
+        namespaces=sorted(n for n in namespaces if n),
+        by_type=by_type,
+        by_status=by_status,
+        avg_importance=round(importance_sum / len(memories), 4) if memories else 0.0,
+        total_access_count=total_access,
+        unresolved_contradictions=len(contradictions),
+        last_memory_at=last_at,
+    )

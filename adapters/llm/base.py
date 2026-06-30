@@ -1,4 +1,4 @@
-"""Provider-agnostic LLM interface for AegisMem."""
+"""Provider-agnostic LLM interface for stateful.ai."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

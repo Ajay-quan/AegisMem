@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,6 +48,12 @@ class RetrievalService:
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Main retrieval entry point — full multi-stage pipeline."""
         start = time.time()
+        query_id = uuid.uuid4().hex
+
+        # Stateful-CL: when enabled, pull the learned per-namespace ranking weights
+        # so the composite score adapts to feedback. Disabled => weights=None =>
+        # static settings weights => original behavior.
+        learned_weights = self._learned_weights(query)
 
         # Stage 1a: Broad dense semantic retrieval (over-retrieve).
         semantic_candidates = await self._semantic_search(query)
@@ -63,7 +70,7 @@ class RetrievalService:
 
         # Stage 2: Enrich with full records + multi-signal scoring.
         enriched = await self._enrich_candidates(
-            fused_ids, semantic_map, lexical_map, query,
+            fused_ids, semantic_map, lexical_map, query, weights=learned_weights,
         )
 
         # Stage 3: Symbolic filters (time range, type, importance).
@@ -84,11 +91,16 @@ class RetrievalService:
             except Exception:
                 pass
 
+        # Stage 6 (Stateful-CL): log the served interaction to the replay buffer so
+        # a later /feedback call can turn it into labeled training examples.
+        self._log_interaction(query_id, query, reranked)
+
         latency_s = time.time() - start
         latency_ms = latency_s * 1000
 
         mode = "hybrid" if (settings.hybrid_retrieval_enabled and lexical_candidates) else "dense"
         metrics.observe_retrieval(mode, latency_s)
+        metrics.observe_retrieval_results(len(reranked), len(filtered))
         logger.info(
             f"Retrieved {len(reranked)}/{len(filtered)} memories for user={query.user_id} "
             f"in {latency_ms:.1f}ms (mode={mode}, dense={len(semantic_candidates)}, "
@@ -100,7 +112,55 @@ class RetrievalService:
             candidates=reranked,
             total_found=len(filtered),
             latency_ms=latency_ms,
+            query_id=query_id if settings.continual_learning_enabled else "",
         )
+
+    # ------------------------------------------------------------- Stateful-CL
+    def _learned_weights(self, query: RetrievalQuery) -> dict[str, float] | None:
+        """Fetch learned per-namespace ranking weights when CL is enabled."""
+        if not settings.continual_learning_enabled:
+            return None
+        try:
+            from domain.learning.registry import get_ranking_policy
+            namespace = query.namespace or f"user:{query.user_id}"
+            return get_ranking_policy().weights(namespace)
+        except Exception as e:  # never let learning break serving
+            logger.debug(f"Learned-weights lookup failed: {e}")
+            return None
+
+    def _log_interaction(
+        self,
+        query_id: str,
+        query: RetrievalQuery,
+        served: list[RetrievalCandidate],
+    ) -> None:
+        """Record served candidates + features to the replay buffer."""
+        if not settings.continual_learning_enabled or not served:
+            return
+        try:
+            from domain.learning.registry import get_replay_buffer
+            from domain.learning.features import extract_features
+            from domain.learning.replay import CandidateRecord
+
+            namespace = query.namespace or f"user:{query.user_id}"
+            records = [
+                CandidateRecord(
+                    memory_id=c.memory.memory_id,
+                    features=extract_features(c),
+                    served_rank=c.rank,
+                    score=c.composite_score,
+                )
+                for c in served
+            ]
+            get_replay_buffer().log(
+                query_id=query_id,
+                user_id=query.user_id,
+                namespace=namespace,
+                query_text=query.query_text,
+                candidates=records,
+            )
+        except Exception as e:  # never let learning break serving
+            logger.debug(f"Replay logging failed: {e}")
 
     async def _semantic_search(
         self, query: RetrievalQuery,
@@ -190,8 +250,13 @@ class RetrievalService:
         semantic_map: dict[str, float],
         lexical_map: dict[str, float],
         query: RetrievalQuery,
+        weights: dict[str, float] | None = None,
     ) -> list[RetrievalCandidate]:
-        """Load full memory records from DB, compute multi-signal scores."""
+        """Load full memory records from DB, compute multi-signal scores.
+
+        ``weights`` overrides the static ranking weights when supplied (the
+        learned Stateful-CL per-namespace policy); ``None`` keeps static behavior.
+        """
         candidates = []
         for memory_id in fused_ids:
             try:
@@ -201,6 +266,7 @@ class RetrievalService:
                     semantic_map.get(memory_id, 0.0),
                     query_text=query.query_text,
                     lexical_score=lexical_map.get(memory_id, 0.0),
+                    weights=weights,
                 )
                 candidates.append(candidate)
             except Exception as e:
@@ -215,7 +281,7 @@ class RetrievalService:
             )
             for memory in memories:
                 candidate = score_memory_for_retrieval(
-                    memory, 0.5, query_text=query.query_text,
+                    memory, 0.5, query_text=query.query_text, weights=weights,
                 )
                 candidates.append(candidate)
 

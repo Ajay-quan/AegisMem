@@ -21,6 +21,7 @@ from services.retrieve_service import RetrievalService
 from services.update_service import UpdateService
 from services.reflect_service import ReflectionService
 from services.contradiction_service import ContradictionService
+from services.feedback_service import FeedbackService
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +31,33 @@ _vector_store: InMemoryVectorStore | None = None
 _graph_store: MockGraphStore | None = None
 
 
+def _fallback_or_raise(component: str, exc: Exception) -> None:
+    """Decide whether an unreachable configured store should fail or fall back.
+
+    In production a configured external store that is unavailable is a fatal
+    misconfiguration — we must not silently downgrade to a non-durable
+    in-memory store and pretend everything is fine. In development/staging we
+    keep the friendly zero-infra fallback.
+    """
+    if settings.strict_stores:
+        raise RuntimeError(
+            f"{component} is configured but unavailable in production "
+            f"(app_env=production): {exc}. Refusing to fall back to the "
+            f"in-memory store. Fix the connection or change the *_STORE setting."
+        ) from exc
+    logger.warning(
+        f"{component} unavailable ({exc}); falling back to in-memory "
+        f"(app_env={settings.app_env}). This is non-durable — do not use in production."
+    )
+
+
 async def get_db_store() -> InMemoryRelationalStore:
     """Return the relational store.
 
-    Defaults to the zero-infra in-memory store so the service boots anywhere.
-    Set ``AEGISMEM_RELATIONAL_STORE=postgres`` for the production store; if
-    Postgres is selected but unreachable, we fall back to in-memory rather than
-    failing startup.
+    Defaults to the zero-infra in-memory store. Set ``RELATIONAL_STORE=postgres``
+    for the production store. If Postgres is selected but unreachable: in
+    production we raise (no silent data-loss fallback); otherwise we fall back
+    to in-memory with a warning.
     """
     global _db_store
     if _db_store is None:
@@ -48,7 +69,7 @@ async def get_db_store() -> InMemoryRelationalStore:
                 _db_store = store
                 logger.info("Using PostgreSQL relational store")
             except Exception as e:
-                logger.warning(f"Postgres unavailable ({e}); using in-memory store")
+                _fallback_or_raise("PostgreSQL relational store", e)
                 store = InMemoryRelationalStore(settings.data_dir)
                 await store.initialize()
                 _db_store = store
@@ -60,48 +81,61 @@ async def get_db_store() -> InMemoryRelationalStore:
 
 
 async def get_vector_store() -> InMemoryVectorStore:
+    """Return the vector store, gated by ``VECTOR_STORE`` (memory|qdrant).
+
+    Only attempts Qdrant when explicitly selected, so the zero-infra default
+    never probes localhost:6333. Production raises on an unreachable Qdrant.
+    """
     global _vector_store
     if _vector_store is None:
-        # Try Qdrant first, fall back to in-memory
-        try:
-            qdrant = QdrantStore(
-                host=settings.qdrant_host,
-                port=settings.qdrant_port,
-                collection_name=settings.qdrant_collection,
-            )
-            embed_backend = get_embedding_backend(
-                settings.embedding_backend, settings.embedding_model
-            )
-            await qdrant.initialize(embed_backend.dimension)
-            _vector_store = qdrant  # type: ignore
-            logger.info("Using Qdrant vector store")
-        except Exception as e:
-            logger.warning(f"Qdrant unavailable ({e}), using in-memory vector store")
-            store = InMemoryVectorStore()
-            embed_backend = get_embedding_backend("mock")
-            await store.initialize(embed_backend.dimension)
-            _vector_store = store
+        if settings.vector_store == "qdrant":
+            try:
+                qdrant = QdrantStore(
+                    host=settings.qdrant_host,
+                    port=settings.qdrant_port,
+                    collection_name=settings.qdrant_collection,
+                )
+                embed_backend = get_embedding_backend(
+                    settings.embedding_backend, settings.embedding_model
+                )
+                await qdrant.initialize(embed_backend.dimension)
+                _vector_store = qdrant  # type: ignore
+                logger.info("Using Qdrant vector store")
+                return _vector_store
+            except Exception as e:
+                _fallback_or_raise("Qdrant vector store", e)
+        store = InMemoryVectorStore()
+        embed_backend = get_embedding()
+        await store.initialize(embed_backend.dimension)
+        _vector_store = store
     return _vector_store
 
 
 async def get_graph_store() -> MockGraphStore:
+    """Return the graph store, gated by ``GRAPH_STORE`` (memory|neo4j).
+
+    Only attempts Neo4j when explicitly selected. Production raises on an
+    unreachable Neo4j.
+    """
     global _graph_store
     if _graph_store is None:
-        try:
-            from adapters.graph_store.neo4j_store import GraphStore as Neo4jStore
-            store = Neo4jStore(
-                uri=settings.neo4j_uri,
-                user=settings.neo4j_user,
-                password=settings.neo4j_password,
-            )
-            await store.connect()
-            _graph_store = store  # type: ignore
-            logger.info("Using Neo4j graph store")
-        except Exception as e:
-            logger.warning(f"Neo4j unavailable ({e}), using mock graph store")
-            mock = MockGraphStore()
-            await mock.connect()
-            _graph_store = mock
+        if settings.graph_store == "neo4j":
+            try:
+                from adapters.graph_store.neo4j_store import GraphStore as Neo4jStore
+                store = Neo4jStore(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                )
+                await store.connect()
+                _graph_store = store  # type: ignore
+                logger.info("Using Neo4j graph store")
+                return _graph_store
+            except Exception as e:
+                _fallback_or_raise("Neo4j graph store", e)
+        mock = MockGraphStore()
+        await mock.connect()
+        _graph_store = mock
     return _graph_store
 
 
@@ -115,10 +149,13 @@ def get_embedding() -> EmbeddingBackend:
     embeddings as the docs claim.
     """
     backend = settings.embedding_backend
-    needs_key = backend in ("openai", "voyage")
-    if needs_key and not (settings.openai_api_key or settings.anthropic_api_key):
+    if backend == "openai" and not settings.openai_api_key:
+        if settings.strict_stores:
+            raise RuntimeError(
+                "EMBEDDING_BACKEND=openai requires OPENAI_API_KEY in production."
+            )
         logger.warning(
-            f"Embedding backend '{backend}' needs an API key but none is set; "
+            "Embedding backend 'openai' needs OPENAI_API_KEY but none is set; "
             "falling back to 'mock'."
         )
         backend = "mock"
@@ -196,3 +233,9 @@ async def get_contradiction_service(
         llm_client=get_llm(),
         graph_store=graph,
     )
+
+
+async def get_feedback_service(
+    db: Annotated[InMemoryRelationalStore, Depends(get_db_store)],
+) -> FeedbackService:
+    return FeedbackService(relational_store=db)

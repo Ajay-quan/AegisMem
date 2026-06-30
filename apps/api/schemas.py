@@ -1,4 +1,4 @@
-"""FastAPI API schemas for AegisMem endpoints."""
+"""FastAPI API schemas for stateful.ai endpoints."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -76,6 +76,39 @@ class RetrieveResponse(BaseModel):
     total_found: int
     latency_ms: float
     context_window: str = ""
+    # Echo back to POST /feedback to close the continual-learning loop. Empty
+    # string when continual learning is disabled.
+    query_id: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Feedback / continual learning
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    query_id: str = Field(..., description="query_id returned by /retrieve")
+    memory_id: str = Field(..., description="which served memory the feedback is about")
+    useful: bool | None = Field(default=None, description="coarse explicit signal")
+    score: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="fine grade in [0,1] (overrides 'useful')",
+    )
+    outcome: str = Field(default="", description="'success' | 'failure' | ''")
+
+
+class FeedbackResponse(BaseModel):
+    recorded: bool
+    reward: float
+    namespace: str
+    policy_updates: int
+    weights: dict[str, float] = Field(default_factory=dict)
+    message: str = ""
+
+
+class LearningStatsResponse(BaseModel):
+    enabled: bool
+    replay: dict[str, Any] = Field(default_factory=dict)
+    policy: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -181,3 +214,9 @@ class StatsResponse(BaseModel):
     user_id: str
     total_memories: int
     namespaces: list[str]
+    by_type: dict[str, int] = Field(default_factory=dict)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    avg_importance: float = 0.0
+    total_access_count: int = 0
+    unresolved_contradictions: int = 0
+    last_memory_at: str = ""

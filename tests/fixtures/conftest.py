@@ -1,4 +1,4 @@
-"""Shared test fixtures for AegisMem tests."""
+"""Shared test fixtures for stateful.ai tests."""
 from __future__ import annotations
 
 import pytest

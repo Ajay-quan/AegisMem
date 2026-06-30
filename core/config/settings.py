@@ -1,4 +1,4 @@
-"""AegisMem core configuration using pydantic-settings."""
+"""stateful.ai core configuration using pydantic-settings."""
 from functools import lru_cache
 from typing import Literal
 
@@ -20,18 +20,50 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
 
+    # --- API security -------------------------------------------------
+    # When ``api_key`` is empty, authentication is disabled (zero-config dev).
+    # Set STATEFUL_AI_API_KEY in production to require the ``X-API-Key`` header
+    # on all /api/* routes.
+    api_key: str = Field(default="", validation_alias="STATEFUL_AI_API_KEY")
+
+    # Scoped multi-tenant keys (revocable, named, optional per-tenant). Format:
+    # comma- or newline-separated "name:secret" or "name:secret:tenant". Works
+    # alongside the single STATEFUL_AI_API_KEY above (which maps to name "default").
+    api_keys: str = Field(default="", validation_alias="STATEFUL_AI_API_KEYS")
+
+    # Comma-separated list of allowed CORS origins ("*" for any).
+    cors_allow_origins: str = "*"
+
+    # Token-bucket rate limiting per client (API key if present, else IP).
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 120
+    rate_limit_burst: int = 30
+
+    # Reject request bodies larger than this many bytes (default 1 MiB).
+    max_request_bytes: int = 1_048_576
+
     # Storage backend selection. "memory" is the zero-infra default so the
-    # full FastAPI service boots with no external database; "postgres" opts
-    # into the production store.
+    # full FastAPI service boots with no external database; the production
+    # values opt into external services. When a non-memory backend is selected
+    # but unreachable, behavior depends on app_env: development/staging fall
+    # back to in-memory (with a warning); production raises so a misconfigured
+    # deployment fails loudly instead of silently losing durability.
     relational_store: Literal["memory", "postgres"] = "memory"
-    data_dir: str = "./data/aegismem"
+    vector_store: Literal["memory", "qdrant"] = "memory"
+    graph_store: Literal["memory", "neo4j"] = "memory"
+    data_dir: str = "./data/stateful_ai"
+
+    @property
+    def strict_stores(self) -> bool:
+        """In production, configured external stores must be reachable."""
+        return self.app_env == "production"
 
     # PostgreSQL
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str = "aegismem"
-    postgres_user: str = "aegismem"
-    postgres_password: str = "aegismem_password"
+    postgres_db: str = "stateful_ai"
+    postgres_user: str = "stateful_ai"
+    postgres_password: str = "stateful_ai_password"
 
     @property
     def postgres_url(self) -> str:
@@ -53,12 +85,12 @@ class Settings(BaseSettings):
     # Qdrant
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
-    qdrant_collection: str = "aegismem_memories"
+    qdrant_collection: str = "stateful_ai_memories"
 
     # Neo4j
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "aegismem_password"
+    neo4j_password: str = "stateful_ai_password"
 
     # LLM Providers
     openai_api_key: str = ""
@@ -68,10 +100,12 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     # "mock" is a deterministic, dependency-free backend used by the zero-infra
     # default and the test suite.
-    embedding_backend: Literal["mock", "sentence_transformers", "openai", "voyage"] = (
+    embedding_backend: Literal["mock", "sentence_transformers", "openai"] = (
         "mock"
     )
     embedding_dimension: int = 1024
+    # OpenAI embedding model used when embedding_backend="openai".
+    openai_embedding_model: str = "text-embedding-3-small"
 
     # Default LLM
     default_llm_provider: Literal["openai", "anthropic", "local", "mock"] = "local"
@@ -123,6 +157,26 @@ class Settings(BaseSettings):
     # Memory-type scoring boosts (applied to composite score)
     type_boost_semantic: float = 0.05   # semantic memories get a small boost
     type_boost_preference: float = 0.03 # preference-type queries boost preference memories
+
+    # --- Continual learning (Stateful-CL) --------------------------------
+    # Master switch. When False (default) retrieval uses the static
+    # ``weight_*`` values above and nothing is logged/learned, so the
+    # zero-infra behavior and existing tests are unchanged. When True, the
+    # per-namespace online ranking policy supplies learned weights, retrievals
+    # are logged to the replay buffer, and /feedback drives online updates.
+    continual_learning_enabled: bool = False
+    cl_learning_rate: float = 0.05       # online SGD step size for the policy
+    cl_ewc_lambda: float = 0.1           # EWC anchor strength (anti-forgetting)
+    cl_replay_capacity: int = 5000       # max logged interactions / labeled examples
+    cl_replay_persist: bool = False      # persist replay buffer to data_dir as JSON
+    cl_reward_success_bonus: float = 0.2 # outcome=success/failure nudge on reward
+    cl_reward_contradiction_penalty: float = 0.3  # penalty for stale/contradicted hits
+
+    # --- Privacy --------------------------------------------------------
+    # Redact PII (emails, phones, cards, SSNs, IPs, provider secrets) at the
+    # ingest boundary so sensitive tokens are never embedded, stored, or
+    # retrieved. Off by default; enable for deployments handling real user data.
+    pii_redaction_enabled: bool = False
 
 
 @lru_cache()

@@ -64,7 +64,10 @@ class TestHealthEndpoint:
     async def test_root_returns_info(self, test_client):
         resp = await test_client.get("/")
         assert resp.status_code == 200
-        assert "AegisMem" in resp.json()["name"]
+        body = resp.json()
+        # Product is branded stateful.ai; stateful.ai is retained as the engine name.
+        assert body["name"] == "stateful.ai"
+        assert body["engine"] == "stateful.ai"
 
 
 class TestIngestEndpoint:

@@ -160,6 +160,7 @@ def score_memory_for_retrieval(
     semantic_score: float,
     query_text: str = "",
     lexical_score: float = 0.0,
+    weights: dict[str, float] | None = None,
 ) -> RetrievalCandidate:
     """Compute all signals and return a fully-scored RetrievalCandidate.
 
@@ -175,6 +176,11 @@ def score_memory_for_retrieval(
         Normalized BM25 overlap (0..1) from the sparse retrieval stage. Left at
         0.0 in dense-only mode, in which case its weight is folded into
         semantic by :func:`compute_composite_score`.
+    weights : dict[str, float] | None
+        Optional per-call ranking weights. When supplied (e.g. the learned
+        per-namespace weights from the Stateful-CL online policy) they override the
+        static ``settings.weight_*`` defaults; when ``None`` the static weights
+        are used, preserving the original behavior exactly.
     """
     # Cosine similarity lives in [-1, 1] and embedding backends can return
     # negative or slightly-out-of-range values; clamp to [0, 1] so the signal
@@ -199,6 +205,7 @@ def score_memory_for_retrieval(
         access_count=memory.access_count,
         lexical_score=lexical_score,
         contradiction_penalty=contradiction_penalty,
+        weights=weights,
     )
 
     # Apply memory-type boost.

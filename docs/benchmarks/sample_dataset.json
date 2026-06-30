@@ -1,0 +1,43 @@
+{
+  "name": "stateful_ai-sample-personal-memory",
+  "description": "Small LoCoMo-style multi-session personal-memory set: facts/preferences per user with queries whose gold answers are specific memory ids. Bundled so the IR benchmark is runnable out of the box; swap in real LoCoMo/LongMemEval JSON via the same schema.",
+  "users": [
+    {
+      "user_id": "alice",
+      "memories": [
+        {"id": "a1", "text": "Alice prefers Python and uses FAISS for local vector search.", "memory_type": "fact"},
+        {"id": "a2", "text": "Alice is allergic to peanuts and avoids Thai restaurants.", "memory_type": "fact"},
+        {"id": "a3", "text": "Alice deploys her portfolio demos on AWS Free Tier t2.micro instances.", "memory_type": "fact"},
+        {"id": "a4", "text": "Alice's manager is Priya and she meets her every Tuesday.", "memory_type": "fact"},
+        {"id": "a5", "text": "Alice is learning to play the cello on weekends.", "memory_type": "observation"},
+        {"id": "a6", "text": "Alice prefers concise morning summaries with calendar conflicts first.", "memory_type": "preference"},
+        {"id": "a7", "text": "Alice switched from MPNet to MiniLM embeddings to reduce memory footprint.", "memory_type": "fact"},
+        {"id": "a8", "text": "Alice's cat is named Pixel and needs medication twice a day.", "memory_type": "fact"}
+      ],
+      "queries": [
+        {"query": "what embedding model does Alice use", "relevant_ids": ["a7", "a1"]},
+        {"query": "where does Alice deploy demos", "relevant_ids": ["a3"]},
+        {"query": "any food allergies", "relevant_ids": ["a2"]},
+        {"query": "who is Alice's manager", "relevant_ids": ["a4"]},
+        {"query": "what pet does Alice have and its care", "relevant_ids": ["a8"]}
+      ]
+    },
+    {
+      "user_id": "ben",
+      "memories": [
+        {"id": "b1", "text": "Ben works in San Francisco and commutes by bike.", "memory_type": "fact"},
+        {"id": "b2", "text": "Ben is a vegetarian and loves Italian food.", "memory_type": "preference"},
+        {"id": "b3", "text": "Ben uses PostgreSQL and Qdrant in production at his startup.", "memory_type": "fact"},
+        {"id": "b4", "text": "Ben's daughter Mia has a soccer game every Saturday morning.", "memory_type": "fact"},
+        {"id": "b5", "text": "Ben prefers dark mode and keyboard-driven tools.", "memory_type": "preference"},
+        {"id": "b6", "text": "Ben is training for a half marathon in October.", "memory_type": "observation"}
+      ],
+      "queries": [
+        {"query": "what databases does Ben run in production", "relevant_ids": ["b3"]},
+        {"query": "Ben dietary preference", "relevant_ids": ["b2"]},
+        {"query": "how does Ben commute", "relevant_ids": ["b1"]},
+        {"query": "what is Ben training for", "relevant_ids": ["b6"]}
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: AegisMem Flask Demo API
+  title: stateful.ai Flask Demo API
   version: 0.2.0
   description: REST API for memory ingestion, semantic retrieval, exact hash lookup, lifecycle updates, version history, import/export, deletion, and graph traversal.
 servers:

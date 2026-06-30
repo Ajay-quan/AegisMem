@@ -1,4 +1,4 @@
-"""Flask REST API for the single-node AegisMem demonstration deployment."""
+"""Flask REST API for the single-node stateful.ai demonstration deployment."""
 from __future__ import annotations
 
 import os
@@ -22,16 +22,27 @@ class ApiError(ValueError):
 def create_app() -> Flask:
     """Create the Flask app with lifecycle memory routes."""
     app = Flask(__name__)
-    data_dir = os.getenv("AEGISMEM_DATA_DIR", "/data/aegismem")
-    embedding_backend = os.getenv("AEGISMEM_EMBEDDING_BACKEND", "mock")
-    vector_backend = os.getenv("AEGISMEM_VECTOR_STORE", "faiss")
-    api_key = os.getenv("AEGISMEM_API_KEY", "")
+    # Default to a project-local path so the app boots anywhere; the Docker
+    # image overrides this with STATEFUL_AI_DATA_DIR=/data/stateful_ai.
+    data_dir = os.getenv("STATEFUL_AI_DATA_DIR", "./data/stateful_ai")
+    embedding_backend = os.getenv("STATEFUL_AI_EMBEDDING_BACKEND", "mock")
+    vector_backend = os.getenv("STATEFUL_AI_VECTOR_STORE", "faiss")
+    api_key = os.getenv("STATEFUL_AI_API_KEY", "")
     service = FlaskMemoryService(
         data_dir=data_dir,
         embedding_backend=embedding_backend,
         vector_backend=vector_backend,
     )
     app.config["memory_service"] = service
+
+    @app.after_request
+    def security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     @app.before_request
     def require_api_key():
@@ -66,7 +77,7 @@ def create_app() -> Flask:
         return jsonify(
             {
                 "status": "ok",
-                "service": "aegismem-flask",
+                "service": "stateful_ai-flask",
                 "data_dir": data_dir,
                 "vector_store": vector_backend,
                 "auth_enabled": bool(api_key),
@@ -161,6 +172,32 @@ def create_app() -> Flask:
     def graph_traversal(memory_id: str):
         depth = int_range(request.args.get("depth", 2), "depth", 1, 5)
         return jsonify({"memory_id": memory_id, "related": service.traverse(memory_id, depth=depth)})
+
+    @app.get("/api/v1/stats")
+    def memory_stats():
+        memories = service.store.list_all(include_deleted=True)
+        active = [m for m in memories if m.status == "active"]
+        users = {m.user_id for m in memories}
+        tags: dict[str, int] = {}
+        for m in active:
+            for tag in m.tags:
+                tags[tag] = tags.get(tag, 0) + 1
+        top_tags = sorted(tags.items(), key=lambda kv: -kv[1])[:8]
+        return jsonify(
+            {
+                "total_memories": len(memories),
+                "active_memories": len(active),
+                "deleted_memories": len(memories) - len(active),
+                "users": len(users),
+                "total_versions": sum(m.version for m in memories),
+                "total_access_count": sum(m.access_count for m in active),
+                "avg_importance": round(
+                    sum(m.importance_score for m in active) / len(active), 4
+                ) if active else 0.0,
+                "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+                "last_updated": max((m.updated_at for m in memories), default=""),
+            }
+        )
 
     @app.get("/api/v1/export")
     def export_memories():

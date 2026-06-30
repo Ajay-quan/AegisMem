@@ -1,4 +1,4 @@
-"""AegisMem evaluation framework — multi-K metrics, nDCG, dual-layer evaluation.
+"""stateful.ai evaluation framework — multi-K metrics, nDCG, dual-layer evaluation.
 
 Supports four benchmark modes:
   SANITY   — small quick smoke test (first 10 pairs)
@@ -368,7 +368,7 @@ class SyntheticDatasetGenerator:
 
 
 class EvaluationRunner:
-    """Runs evaluation suites against the AegisMem system."""
+    """Runs evaluation suites against the stateful.ai system."""
 
     def __init__(self, ingest_svc: Any, retrieve_svc: Any, contradiction_svc: Any) -> None:
         self._ingest = ingest_svc

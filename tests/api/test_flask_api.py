@@ -5,13 +5,13 @@ import importlib
 
 
 def make_client(tmp_path, monkeypatch, api_key: str = ""):
-    monkeypatch.setenv("AEGISMEM_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AEGISMEM_EMBEDDING_BACKEND", "mock")
-    monkeypatch.setenv("AEGISMEM_VECTOR_STORE", "faiss")
+    monkeypatch.setenv("STATEFUL_AI_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("STATEFUL_AI_EMBEDDING_BACKEND", "mock")
+    monkeypatch.setenv("STATEFUL_AI_VECTOR_STORE", "faiss")
     if api_key:
-        monkeypatch.setenv("AEGISMEM_API_KEY", api_key)
+        monkeypatch.setenv("STATEFUL_AI_API_KEY", api_key)
     else:
-        monkeypatch.delenv("AEGISMEM_API_KEY", raising=False)
+        monkeypatch.delenv("STATEFUL_AI_API_KEY", raising=False)
     module = importlib.import_module("apps.flask_app")
     return module.create_app().test_client()
 

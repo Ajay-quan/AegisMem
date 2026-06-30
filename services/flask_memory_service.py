@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from adapters.embeddings.langchain_adapter import AegisMemEmbeddings
+from adapters.embeddings.langchain_adapter import StatefulEmbeddings
 from adapters.graph_store.memory_graph import LocalMemoryGraph
 from adapters.relational_store.json_store import JsonMemoryStore, StoredMemory
 from adapters.vector_store.faiss_store import FaissVectorStore
@@ -70,7 +70,7 @@ class FlaskMemoryService:
             backend: Any = SentenceTransformerBackend(embedding_model)
         else:
             backend = DeterministicEmbeddingBackend()
-        self.embeddings = AegisMemEmbeddings(backend)
+        self.embeddings = StatefulEmbeddings(backend)
         self.store = JsonMemoryStore(self.data_dir / "memories.json")
         if vector_backend == "chroma":
             from adapters.vector_store.chroma_store import ChromaVectorStore

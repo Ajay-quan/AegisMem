@@ -1,6 +1,6 @@
 """Sparse lexical retrieval (BM25) and rank fusion.
 
-This module implements the *lexical* half of AegisMem's hybrid retrieval
+This module implements the *lexical* half of stateful.ai's hybrid retrieval
 pipeline. Dense vector search is strong on paraphrase and semantic similarity
 but weak on rare tokens, identifiers, names, and exact keywords — exactly the
 signals that matter for agent memory ("the API key is ...", "user_id 4471").

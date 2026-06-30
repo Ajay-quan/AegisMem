@@ -1,6 +1,6 @@
-"""AegisMem MCP server — expose agent memory as Model Context Protocol tools.
+"""stateful.ai MCP server — expose agent memory as Model Context Protocol tools.
 
-This turns AegisMem from a REST service into something any MCP-capable agent
+This turns stateful.ai from a REST service into something any MCP-capable agent
 (Claude Desktop, Cursor, LangGraph, custom runtimes) can plug into directly,
 giving the agent durable, cross-session memory through four tools:
 
@@ -22,7 +22,7 @@ Register with Claude Desktop by adding to ``claude_desktop_config.json``:
 
     {
       "mcpServers": {
-        "aegismem": {"command": "python", "args": ["-m", "integrations.mcp_server"]}
+        "stateful_ai": {"command": "python", "args": ["-m", "integrations.mcp_server"]}
       }
     }
 """
@@ -41,13 +41,16 @@ try:
     from mcp.server.fastmcp import FastMCP
 except Exception as exc:  # pragma: no cover - dependency guard
     raise SystemExit(
-        "The MCP SDK is required to run the AegisMem MCP server.\n"
+        "The MCP SDK is required to run the stateful.ai MCP server.\n"
         "Install it with:  pip install 'mcp[cli]'\n"
         f"(import error: {exc})"
     )
 
 
-mcp = FastMCP("AegisMem")
+mcp = FastMCP("stateful.ai")
+
+# Valid memory types — mirrors core.schemas.memory.MemoryType exactly.
+VALID_MEMORY_TYPES = [t.value for t in MemoryType]
 
 # Lazily-initialized singletons so tool calls share one store/index instance.
 _services: dict[str, object] = {}
@@ -70,7 +73,7 @@ async def _ensure_services() -> None:
         _services["db"] = db
         _services["ingest"] = await get_ingest_service(db, vs, graph)
         _services["retrieve"] = await get_retrieve_service(db, vs)
-        logger.info("AegisMem MCP services initialized (store=%s)", type(db).__name__)
+        logger.info("stateful.ai MCP services initialized (store=%s)", type(db).__name__)
 
 
 @mcp.tool()
@@ -83,18 +86,23 @@ async def remember(
     """Store a new memory for an agent/user.
 
     Args:
-        content: The text to remember (a fact, preference, event, or note).
+        content: The text to remember (a fact, observation, episode, or note).
         user_id: Owner of the memory; isolates memories per user/agent.
-        memory_type: One of observation, fact, preference, event, reflection.
+        memory_type: One of observation, fact, episode, procedure, reflection,
+            working, summary. Defaults to observation.
         importance: Optional 0..1 importance override; auto-scored if omitted.
 
-    Returns the stored memory id and content.
+    Returns the stored memory id and content, or an error if memory_type is
+    invalid (so the caller can correct it rather than silently mis-typing).
     """
     await _ensure_services()
     try:
         mtype = MemoryType(memory_type)
     except ValueError:
-        mtype = MemoryType.OBSERVATION
+        return {
+            "error": f"invalid memory_type '{memory_type}'",
+            "valid_memory_types": VALID_MEMORY_TYPES,
+        }
     memory = await _services["ingest"].ingest_text(  # type: ignore[attr-defined]
         text=content, user_id=user_id, memory_type=mtype, importance_override=importance,
     )
@@ -106,7 +114,7 @@ async def remember(
 async def recall(query: str, user_id: str = "default", top_k: int = 5) -> dict:
     """Retrieve the most relevant memories for a query.
 
-    Uses AegisMem's hybrid pipeline: dense semantic search + BM25 lexical
+    Uses stateful.ai's hybrid pipeline: dense semantic search + BM25 lexical
     search fused with Reciprocal Rank Fusion, then multi-signal reranking
     (recency, importance, access frequency).
 
@@ -159,7 +167,7 @@ async def list_memories(user_id: str = "default", limit: int = 20) -> dict:
 
 def main() -> None:
     setup_logging(settings.log_level)
-    logger.info("Starting AegisMem MCP server (stdio transport)")
+    logger.info("Starting stateful.ai MCP server (stdio transport)")
     mcp.run()
 
 

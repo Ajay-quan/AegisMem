@@ -1,4 +1,4 @@
-"""AegisMem structured logging with JSON output and trace IDs."""
+"""stateful.ai structured logging with JSON output and trace IDs."""
 import logging
 import sys
 import uuid
@@ -24,7 +24,7 @@ user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 
 if _JSON_LOGGING:
 
-    class AegisJsonFormatter(jsonlogger.JsonFormatter):
+    class StatefulJsonFormatter(jsonlogger.JsonFormatter):
         """Custom JSON formatter that injects trace context."""
 
         def add_fields(
@@ -34,7 +34,7 @@ if _JSON_LOGGING:
             message_dict: dict[str, Any],
         ) -> None:
             super().add_fields(log_record, record, message_dict)
-            log_record["service"] = "aegismem"
+            log_record["service"] = "stateful_ai"
             log_record["request_id"] = request_id_var.get() or str(uuid.uuid4())
             log_record["session_id"] = session_id_var.get()
             log_record["agent_id"] = agent_id_var.get()
@@ -51,7 +51,7 @@ def setup_logging(level: str = "INFO") -> None:
     """
     handler = logging.StreamHandler(sys.stdout)
     if _JSON_LOGGING:
-        formatter: logging.Formatter = AegisJsonFormatter(
+        formatter: logging.Formatter = StatefulJsonFormatter(
             fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )

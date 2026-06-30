@@ -1,4 +1,4 @@
-"""Core Pydantic v2 schemas for AegisMem memory objects."""
+"""Core Pydantic v2 schemas for stateful.ai memory objects."""
 from __future__ import annotations
 
 import uuid
@@ -82,7 +82,7 @@ class ImportanceLevel(str, Enum):
 
 
 class MemoryItem(BaseModel):
-    """The canonical memory record. Every memory in AegisMem is a MemoryItem."""
+    """The canonical memory record. Every memory in stateful.ai is a MemoryItem."""
 
     memory_id: str = Field(default_factory=new_id)
     namespace: str = Field(..., description="Logical partition (e.g. 'user:123:agent:chat')")
@@ -256,6 +256,10 @@ class RetrievalResult(BaseModel):
     total_found: int
     retrieved_at: datetime = Field(default_factory=utcnow)
     latency_ms: float = 0.0
+    # Correlation id for the Stateful-CL feedback loop: clients echo this back to
+    # POST /feedback so served candidates become labeled training examples.
+    # Empty when continual learning is disabled.
+    query_id: str = ""
 
 
 # ---------------------------------------------------------------------------

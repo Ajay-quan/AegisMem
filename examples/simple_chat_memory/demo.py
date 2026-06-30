@@ -1,5 +1,5 @@
 """
-AegisMem Simple Chat Memory Demo
+stateful.ai Simple Chat Memory Demo
 ==================================
 Demonstrates end-to-end memory: ingest, retrieve, reflect, and show context.
 Runs without any external services using mock backends.
@@ -26,7 +26,7 @@ from core.schemas.memory import RetrievalQuery, MemoryType
 
 async def main():
     print("\n" + "=" * 60)
-    print("  AegisMem - Simple Chat Memory Demo")
+    print("  stateful.ai - Simple Chat Memory Demo")
     print("=" * 60 + "\n")
 
     # -------------------------------------------------------------------

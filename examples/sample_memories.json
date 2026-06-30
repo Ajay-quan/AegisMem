@@ -16,7 +16,7 @@
   {
     "user_id": "alice",
     "key": "graph-memory",
-    "content": "AegisMem connects related memories through weighted graph edges and BFS traversal.",
+    "content": "stateful.ai connects related memories through weighted graph edges and BFS traversal.",
     "tags": ["graph", "memory"],
     "importance_score": 0.8
   },

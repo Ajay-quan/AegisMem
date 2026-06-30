@@ -1,9 +1,9 @@
-# AegisMem core runtime — boots the FastAPI service end-to-end with NO external
+# stateful.ai core runtime — boots the FastAPI service end-to-end with NO external
 # infrastructure (in-memory relational + vector + graph stores, deterministic
 # mock embeddings). This set matches the lean core in pyproject.toml.
 #
 #   pip install -r requirements.txt
-#   AEGISMEM_RELATIONAL_STORE=memory uvicorn apps.api.main:app --reload
+#   STATEFUL_AI_RELATIONAL_STORE=memory uvicorn apps.api.main:app --reload
 #
 # Opt into heavier capabilities via pyproject extras, e.g.:
 #   pip install -e ".[postgres,qdrant,neo4j,embeddings,llm,observability,mcp]"
