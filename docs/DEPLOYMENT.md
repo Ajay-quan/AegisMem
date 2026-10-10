@@ -33,7 +33,27 @@ docker compose -f infra/compose/docker-compose.yml exec api \
 The `migrate` service runs `alembic upgrade head` as `aegis_owner` before the API starts.
 Add `--profile observability` for Prometheus (`:9090`) and Grafana (`:3000`).
 
-## Kubernetes
+## Kubernetes (Helm, recommended)
+
+```bash
+kubectl create namespace aegismem
+# Create the `aegismem-secrets` Secret from your secret manager (keys: see values.yaml)
+helm install aegismem infra/helm/aegismem -n aegismem \
+  --set image.digest=sha256:<digest> \
+  --set config.EMBEDDING_MODEL=text-embedding-3-small --set-string config.EMBEDDING_DIMENSION=1536 \
+  --set serviceMonitor.enabled=true --set prometheusRule.enabled=true
+```
+
+Migrations run as a `pre-install`/`pre-upgrade` hook as the schema-owner role; pods roll only after they
+succeed. Verified end to end on a local kind cluster: hook migration, 2 replicas ready (RLS boot check
+as a non-superuser role, embedding dimension probe), aegis-audit 7/7 through the Service, and a
+zero-downtime `helm upgrade`.
+
+Two Kubernetes pitfalls the chart already handles: pods set `enableServiceLinks: false` (a Service
+named `postgres` would otherwise inject `POSTGRES_PORT=tcp://...` and break configuration), and the
+migration hook does not reference chart-created resources (hooks run before them).
+
+## Kubernetes (Kustomize)
 
 ```bash
 kubectl create namespace aegismem
@@ -56,6 +76,7 @@ readiness (checks Postgres and the control plane), `/health` liveness, and a PDB
 | Metrics | `GET /metrics` (expose only to the monitoring namespace; see NetworkPolicy) |
 | Tracing | `OTEL_ENABLED=true` + standard `OTEL_EXPORTER_OTLP_*` env; requires the `otel` extra |
 | Integrity regression check | `python -m bench.run`; `aegis-audit --target aegismem --url ...` |
+| Dashboards and alerts | `infra/observability/` (Grafana JSON, Prometheus rules; Helm `prometheusRule.enabled`) |
 
 ### Key alerts
 - `aegis_outbox_ops_total{result="dead"}` increasing: index repairs failing permanently.

@@ -1,0 +1,45 @@
+image:
+  repository: ghcr.io/aegismem/api
+  tag: ""            # defaults to .Chart.AppVersion; pin a digest in production via `digest`
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 }
+podDisruptionBudget: { minAvailable: 1 }
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { memory: 1Gi }
+
+# Non-secret configuration (rendered into a ConfigMap).
+config:
+  APP_ENV: production
+  AUTH_ENABLED: "true"
+  REQUIRE_RLS: "true"
+  VECTOR_BACKEND: pgvector
+  GRAPH_BACKEND: none
+  RATE_LIMIT_BACKEND: redis
+  EMBEDDING_BACKEND: openai
+  EMBEDDING_API_BASE: https://api.openai.com/v1
+  EMBEDDING_MODEL: text-embedding-3-small
+  EMBEDDING_DIMENSION: "1536"
+  METRICS_ENABLED: "true"
+  OTEL_ENABLED: "false"
+  OUTBOX_WORKER_ENABLED: "true"
+  LOG_LEVEL: INFO
+
+# Secret with APP_SECRET_KEY, API_KEY_PEPPER, POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER
+# (NOSUPERUSER NOBYPASSRLS role), POSTGRES_PASSWORD, REDIS_URL, AEGIS_MIGRATION_URL (owner role),
+# EMBEDDING_API_KEY. Manage it with your secret manager; the chart never creates it.
+existingSecret: aegismem-secrets
+
+migrations:
+  enabled: true      # pre-install/pre-upgrade hook running `alembic upgrade head` as the owner role
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+  monitoringNamespace: monitoring
+
+serviceMonitor: { enabled: false, interval: 30s }
+prometheusRule: { enabled: false }

@@ -20,6 +20,8 @@ spec:
     spec:
       serviceAccountName: aegismem
       terminationGracePeriodSeconds: 30
+      # Kubernetes service-link env vars (e.g. POSTGRES_PORT=tcp://...) collide with app settings.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

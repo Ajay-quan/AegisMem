@@ -53,3 +53,25 @@ def test_compose_runs_api_as_non_superuser_app_role():
     assert compose["services"]["api"]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     roles = (ROOT / "infra/compose/initdb/01-roles.sh").read_text()
     assert "aegis_app" in roles and "NOSUPERUSER NOBYPASSRLS" in roles
+
+
+def test_pods_disable_service_links(k8s):
+    """Service-link env vars (POSTGRES_PORT=tcp://...) would override app settings."""
+    assert k8s["Deployment"]["spec"]["template"]["spec"]["enableServiceLinks"] is False
+    assert k8s["Job"]["spec"]["template"]["spec"]["enableServiceLinks"] is False
+
+
+def test_helm_chart_renders_hardened_and_hook_safe():
+    if shutil.which("helm") is None:
+        pytest.skip("helm not installed")
+    out = subprocess.run(["helm", "template", "t", str(ROOT / "infra/helm/aegismem")],
+                         capture_output=True, text=True, check=True).stdout
+    docs = {d["kind"]: d for d in yaml.safe_load_all(out) if d}
+    job = docs["Job"]
+    assert job["metadata"]["annotations"]["helm.sh/hook"] == "pre-install,pre-upgrade"
+    # pre-install hooks run before chart resources exist: must not reference the chart's SA
+    assert "serviceAccountName" not in job["spec"]["template"]["spec"]
+    for kind in ("Deployment", "Job"):
+        spec = docs[kind]["spec"]["template"]["spec"]
+        assert spec["enableServiceLinks"] is False
+        assert spec["containers"][0]["securityContext"]["readOnlyRootFilesystem"] is True
