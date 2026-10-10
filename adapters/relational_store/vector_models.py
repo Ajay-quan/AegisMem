@@ -15,7 +15,12 @@ VECTOR_DIM = int(os.environ.get("AEGIS_VECTOR_DIM", "384"))
 
 class MemoryVector(Base):
     __tablename__ = "memory_vectors"
-    __table_args__ = (Index("ix_memory_vectors_scope", "tenant_id", "user_id", "status"),)
+    __table_args__ = (
+        Index("ix_memory_vectors_scope", "tenant_id", "user_id", "status"),
+        # Postgres only (ignored by other dialects): approximate-NN index for cosine search.
+        Index("ix_memory_vectors_hnsw", "embedding", postgresql_using="hnsw",
+              postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")

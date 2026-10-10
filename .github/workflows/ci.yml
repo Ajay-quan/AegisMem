@@ -27,6 +27,9 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U aegis" --health-interval 5s
           --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.17.0
+        ports: ["6333:6333"]
       redis:
         image: redis:7
         ports: ["6379:6379"]
@@ -34,6 +37,7 @@ jobs:
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       AEGIS_TEST_REDIS_URL: redis://localhost:6379/0
+      AEGIS_TEST_QDRANT: localhost:6333
       AEGIS_TEST_PG_URL: postgresql+asyncpg://aegis:aegis@localhost:5432/aegis_test
       AEGIS_MIGRATION_URL: postgresql://aegis:aegis@localhost:5432/aegis_migrations
     steps:

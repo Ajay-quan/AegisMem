@@ -4,6 +4,7 @@ Runs against InMemory and pgvector (SQLite locally; real Postgres+pgvector in CI
 AEGIS_TEST_PG_URL is set). Add new backends (e.g. Qdrant with a live server) to BACKENDS.
 """
 import os
+import uuid
 
 import pytest
 
@@ -13,7 +14,9 @@ from adapters.vector_store.qdrant_store import InMemoryVectorStore
 
 DIM = 8
 PG_URL = os.environ.get("AEGIS_TEST_PG_URL")
-BACKENDS = ["memory", "pgvector-sqlite"] + (["pgvector-postgres"] if PG_URL else [])
+QDRANT = os.environ.get("AEGIS_TEST_QDRANT")  # host:port, set in CI
+BACKENDS = (["memory", "pgvector-sqlite"] + (["pgvector-postgres"] if PG_URL else [])
+            + (["qdrant"] if QDRANT else []))
 
 
 def vec(*xs):
@@ -25,6 +28,10 @@ def vec(*xs):
 async def vs(request, tmp_path):
     if request.param == "memory":
         store = InMemoryVectorStore()
+    elif request.param == "qdrant":
+        from adapters.vector_store.qdrant_store import QdrantStore
+        host, port = QDRANT.split(":")
+        store = QdrantStore(host=host, port=int(port), collection_name=f"contract_{uuid.uuid4().hex[:8]}")
     elif request.param == "pgvector-sqlite":
         store = PgVectorStore(f"sqlite+aiosqlite:///{tmp_path}/vec.db")
     else:
@@ -38,6 +45,8 @@ async def vs(request, tmp_path):
                 f"payload json not null)")
     await store.initialize(DIM)
     yield store
+    if request.param == "qdrant":
+        await (await store._get_client()).delete_collection(store.collection_name)
     if hasattr(store, "close"):
         await store.close()
 
@@ -82,3 +91,21 @@ async def test_tenant_wrapper_isolation(vs):
         await t2.upsert("a", vec(1), {"user_id": "u"})
     with pytest.raises(TenantViolation):
         await t1.update_payload("a", {"tenant_id": "t2"})
+
+
+@pytest.mark.skipif(not QDRANT, reason="needs Qdrant (set in CI)")
+async def test_qdrant_backfill_stamps_only_untenanted_points():
+    from adapters.vector_store.qdrant_store import QdrantStore
+    host, port = QDRANT.split(":")
+    store = QdrantStore(host=host, port=int(port), collection_name=f"backfill_{uuid.uuid4().hex[:8]}")
+    await store.initialize(DIM)
+    try:
+        await store.upsert("legacy-1", vec(1), {"user_id": "u", "status": "active"})
+        await store.upsert("legacy-2", vec(0, 1), {"user_id": "u", "status": "active"})
+        await store.upsert("new-1", vec(1, 1), {"user_id": "u", "status": "active", "tenant_id": "t9"})
+        assert await store.backfill_tenant("default", batch=1) == 2
+        assert (await store.get("legacy-1")).payload["tenant_id"] == "default"
+        assert (await store.get("new-1")).payload["tenant_id"] == "t9"
+        assert await store.backfill_tenant("default") == 0  # idempotent
+    finally:
+        await (await store._get_client()).delete_collection(store.collection_name)

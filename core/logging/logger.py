@@ -5,7 +5,10 @@ import uuid
 from contextvars import ContextVar
 from typing import Any
 
-from pythonjsonlogger import jsonlogger
+try:  # python-json-logger >= 3 moved the module
+    from pythonjsonlogger import json as jsonlogger
+except ImportError:  # pragma: no cover
+    from pythonjsonlogger import jsonlogger
 
 # Context variables for trace propagation
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")

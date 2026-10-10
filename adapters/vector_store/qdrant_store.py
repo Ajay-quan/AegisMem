@@ -88,13 +88,15 @@ class QdrantStore(VectorStore):
                 from qdrant_client.models import Filter as QFilter
                 qdrant_filter = QFilter(must=conditions)
 
-        results = await client.search(
+        # query_points replaces the removed `search` API (qdrant-client >= 1.12).
+        response = await client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             query_filter=qdrant_filter,
             with_payload=True,
         )
+        results = response.points
 
         return [
             VectorSearchResult(

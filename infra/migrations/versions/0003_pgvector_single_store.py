@@ -36,11 +36,9 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=False),
     )
     op.create_index("ix_memory_vectors_scope", "memory_vectors", ["tenant_id", "user_id", "status"])
-    if is_pg:
-        op.execute(
-            "CREATE INDEX ix_memory_vectors_hnsw ON memory_vectors "
-            "USING hnsw (embedding vector_cosine_ops)"
-        )
+    # HNSW on Postgres; other dialects get a plain index (keeps model and schema identical).
+    op.create_index("ix_memory_vectors_hnsw", "memory_vectors", ["embedding"],
+                    postgresql_using="hnsw", postgresql_ops={"embedding": "vector_cosine_ops"})
 
 
 def downgrade() -> None:
