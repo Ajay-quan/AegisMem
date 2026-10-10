@@ -11,6 +11,9 @@ HTTP_REQUESTS = Counter(
 HTTP_LATENCY = Histogram(
     "aegis_http_request_seconds", "HTTP request latency", ["method", "route"], registry=REGISTRY,
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5))
+RATE_LIMITED = Counter(
+    "aegis_rate_limited_total", "Requests rejected by per-tenant rate limits", ["class"],
+    registry=REGISTRY)
 AUTH_FAILURES = Counter(
     "aegis_auth_failures_total", "Rejected API calls", ["reason"], registry=REGISTRY)
 

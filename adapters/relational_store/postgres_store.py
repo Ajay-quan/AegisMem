@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy import select, update, and_, func, delete, or_
 
 from core.exceptions import MemoryNotFoundError, MemoryStorageError
+from core.tenancy_context import apply_rls
 from core.schemas.memory import MemoryItem, MemoryStatus, FactRecord as SchemaFact
 from .models import (
     Base, MemoryRecord, FactRecord as DBFact, ReflectionRecord,
@@ -52,6 +53,7 @@ class PostgresStore:
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
         async with self._session_factory() as sess:
             try:
+                await apply_rls(sess)
                 yield sess
                 await sess.commit()
             except Exception:

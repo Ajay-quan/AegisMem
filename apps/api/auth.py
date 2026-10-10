@@ -30,7 +30,8 @@ from adapters.relational_store.control_models import ApiKeyRecord
 from adapters.relational_store.control_store import ControlStore
 from apps.api.control import get_control_store
 from core.config.settings import settings
-from core.observability.metrics import AUTH_FAILURES
+from core.observability.metrics import AUTH_FAILURES, RATE_LIMITED
+from apps.api.ratelimit import get_limiter, limits_for
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,15 @@ async def authorize(
     if not principal.has(scope):
         AUTH_FAILURES.labels("insufficient_scope").inc()
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"API key lacks scope '{scope}'")
+    limiter = get_limiter()
+    if limiter is not None:
+        cls, rate, burst = limits_for(scope)
+        decision = await limiter.hit(f"{principal.tenant_id}:{cls}", rate, burst)
+        if not decision.allowed:
+            RATE_LIMITED.labels(cls).inc()
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"rate limit exceeded ({cls})",
+                                headers={"Retry-After": str(decision.retry_after_s),
+                                         "X-RateLimit-Limit": str(rate)})
     request.state.principal = principal
     return principal
 

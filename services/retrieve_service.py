@@ -20,6 +20,7 @@ from core.schemas.memory import (
 )
 from domain.memory.scoring import score_memory_for_retrieval, rank_candidates
 from core.observability.metrics import GUARD_DECISIONS
+from core.observability.tracing import tracer
 from domain.memory.reranker import HeuristicReranker
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,16 @@ class RetrievalService:
         )
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
-        """Main retrieval entry point — full multi-stage pipeline."""
+        """Main retrieval entry point (span: aegis.retrieve)."""
+        with tracer.start_as_current_span("aegis.retrieve") as span:
+            result = await self._retrieve(query)
+            span.set_attributes({"aegis.retrieval_id": result.retrieval_id,
+                                 "aegis.returned": len(result.candidates),
+                                 "aegis.guard_interventions": len(result.guard_report),
+                                 "aegis.learned_weights": self._learner is not None})
+            return result
+
+    async def _retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         start = time.time()
 
         # Stage 1: Broad semantic retrieval (over-retrieve).

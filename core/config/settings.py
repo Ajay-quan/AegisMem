@@ -49,6 +49,16 @@ class Settings(BaseSettings):
 
     # Observability
     metrics_enabled: bool = True
+    otel_enabled: bool = False
+    otel_exporter: Literal["otlp", "console"] = "otlp"
+    otel_service_name: str = "aegismem-api"
+
+    # Per-tenant rate limits (token bucket). "redis" is required for multi-replica correctness.
+    rate_limit_backend: Literal["off", "memory", "redis"] = "memory"
+    rate_limit_read_per_minute: int = 1200
+    rate_limit_read_burst: int = 200
+    rate_limit_write_per_minute: int = 600
+    rate_limit_write_burst: int = 100
 
     # Vector-sync outbox worker (repairs index writes that failed inline)
     outbox_worker_enabled: bool = True

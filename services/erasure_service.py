@@ -21,6 +21,7 @@ from typing import Any
 from core.config.settings import settings
 from core.exceptions import MemoryNotFoundError
 from core.observability.metrics import ERASED_ITEMS, ERASURES
+from core.observability.tracing import tracer
 from domain.integrity import receipts
 from domain.integrity.provenance import derived_from
 
@@ -76,7 +77,16 @@ class ErasureService:
         self._receipts = receipt_store or InMemoryReceiptStore()
         self._key = (signing_key or settings.app_secret_key).encode("utf-8")
 
-    async def forget(
+    async def forget(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Span: aegis.erasure (counts and verification only)."""
+        with tracer.start_as_current_span("aegis.erasure") as span:
+            receipt = await self._forget(*args, **kwargs)
+            body = receipt["body"]
+            span.set_attributes({"aegis.receipt_id": body["receipt_id"], "aegis.erased": len(body["erased"]),
+                                 "aegis.verified": body["verified"], "aegis.scope": body["scope"]})
+            return receipt
+
+    async def _forget(
         self,
         user_id: str,
         memory_ids: list[str] | None = None,

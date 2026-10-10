@@ -19,6 +19,7 @@ from typing import Any
 
 from core.exceptions import MemoryNotFoundError
 from core.observability.metrics import OUTBOX_PROCESSED
+from core.tenancy_context import system_context
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,10 @@ class OutboxWorker:
         self.batch = batch
 
     async def drain_once(self) -> dict[str, int]:
+        with system_context():  # cross-tenant system job; tenant checked per record below
+            return await self._drain()
+
+    async def _drain(self) -> dict[str, int]:
         stats = {"done": 0, "retry": 0, "dead": 0}
         for rec in await self._control.due_outbox(self.batch):
             try:

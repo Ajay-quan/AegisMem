@@ -28,3 +28,10 @@ async def _isolated_control_plane(tmp_path):
     app.dependency_overrides.pop(deps.get_control_store, None)
     app.dependency_overrides.pop(deps.get_runtime, None)
     await store.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_rate_limits(monkeypatch):
+    """Shared in-process buckets would make unrelated tests flaky; rate-limit tests opt back in."""
+    from core.config.settings import settings
+    monkeypatch.setattr(settings, "rate_limit_backend", "off")

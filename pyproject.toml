@@ -55,6 +55,8 @@ dependencies = [
 [project.optional-dependencies]
 # Local embedding models (pulls PyTorch; not needed with API embeddings or in CI).
 local-embeddings = ["sentence-transformers>=3.0.0"]
+# OTLP trace export.
+otel = ["opentelemetry-exporter-otlp-proto-http>=1.24.0"]
 # Agent-framework integrations.
 agents = ["langgraph>=0.1.0", "langchain-core>=0.2.0", "tiktoken>=0.7.0"]
 dev = [

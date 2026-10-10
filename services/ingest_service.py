@@ -12,6 +12,7 @@ from domain.integrity.provenance import (
     base_trust, derived_from, derived_trust, get_trust, should_quarantine,
 )
 from core.observability.metrics import WRITES
+from opentelemetry import trace
 from services.vector_sync import index_payload
 from domain.memory.scoring import compute_importance_heuristic
 
@@ -155,8 +156,11 @@ class IngestionService:
             quarantine["at"] = utcnow().isoformat()
             metadata["quarantine"] = quarantine
             logger.warning(f"Quarantined memory from session={observation.session_id}: {reason}")
-        WRITES.labels(getattr(self._db, "tenant_id", "unscoped"), source,
-                      f"quarantined_{quarantine['trigger']}" if quarantine else "stored").inc()
+        outcome = f"quarantined_{quarantine['trigger']}" if quarantine else "stored"
+        WRITES.labels(getattr(self._db, "tenant_id", "unscoped"), source, outcome).inc()
+        span = trace.get_current_span()
+        span.set_attributes({"aegis.write.source": source, "aegis.write.outcome": outcome,
+                             "aegis.write.trust": round(trust, 3)})
         return metadata, status
 
     async def ingest_batch(

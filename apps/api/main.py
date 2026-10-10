@@ -21,6 +21,9 @@ from apps.api.auth import authorize, require_admin
 from adapters.tenancy import TenantViolation
 from core.exceptions import MemoryNotFoundError
 from core.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS, REGISTRY
+from core.observability.tracing import setup_tracing, tracer
+from opentelemetry.propagate import extract
+from opentelemetry.trace import SpanKind
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from apps.api.schemas import HealthResponse
 
@@ -32,6 +35,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info(f"AegisMem starting up (env={settings.app_env})")
     validate_runtime_config()
+    setup_tracing()
     try:
         from apps.api.control import get_control_store
         from apps.api.dependencies import get_raw_db_store, get_raw_vector_store, get_graph_store
@@ -112,9 +116,19 @@ def create_app() -> FastAPI:
     async def trace_middleware(request: Request, call_next):
         request_id = new_request_id()
         start = time.time()
-        response = await call_next(request)
+        with tracer.start_as_current_span(
+            f"HTTP {request.method}", context=extract(request.headers), kind=SpanKind.SERVER,
+        ) as span:
+            response = await call_next(request)
+            route = getattr(request.scope.get("route"), "path", "unmatched")  # template, not raw path
+            span.update_name(f"{request.method} {route}")
+            span.set_attributes({"http.request.method": request.method, "http.route": route,
+                                 "http.response.status_code": response.status_code,
+                                 "aegis.request_id": request_id})
+            ctx = span.get_span_context()
+            if ctx.is_valid:
+                response.headers["X-Trace-Id"] = format(ctx.trace_id, "032x")
         duration_ms = (time.time() - start) * 1000
-        route = getattr(request.scope.get("route"), "path", "unmatched")  # template, not raw path
         HTTP_REQUESTS.labels(request.method, route, str(response.status_code)).inc()
         HTTP_LATENCY.labels(request.method, route).observe(duration_ms / 1000)
         response.headers["X-Request-ID"] = request_id

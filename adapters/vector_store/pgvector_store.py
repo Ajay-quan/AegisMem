@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from adapters.relational_store.vector_models import MemoryVector
 from adapters.vector_store.base import VectorSearchResult, VectorStore
+from core.tenancy_context import apply_rls
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class PgVectorStore(VectorStore):
         self._check_dim(vector)
         cols = {c: str(payload.get(c, "")) for c in _COLUMNS}
         async with self._sessions.begin() as s:
+            await apply_rls(s)
             row = await s.get(MemoryVector, id)
             if row is None:
                 s.add(MemoryVector(id=id, embedding=list(vector), payload=dict(payload), **cols))
@@ -71,6 +73,7 @@ class PgVectorStore(VectorStore):
 
     async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
         async with self._sessions.begin() as s:
+            await apply_rls(s)
             row = await s.get(MemoryVector, id)
             if row is None:
                 return
@@ -81,11 +84,13 @@ class PgVectorStore(VectorStore):
 
     async def get(self, id: str) -> VectorSearchResult | None:
         async with self._sessions() as s:
+            await apply_rls(s)
             row = await s.get(MemoryVector, id)
             return VectorSearchResult(id=row.id, score=1.0, payload=row.payload or {}) if row else None
 
     async def delete(self, id: str) -> None:
         async with self._sessions.begin() as s:
+            await apply_rls(s)
             row = await s.get(MemoryVector, id)
             if row is not None:
                 await s.delete(row)
@@ -102,6 +107,7 @@ class PgVectorStore(VectorStore):
             stmt = stmt.where(getattr(MemoryVector, k) == v)
 
         async with self._sessions() as s:
+            await apply_rls(s)
             if self._is_pg:
                 dist = MemoryVector.embedding.cosine_distance(query_vector)
                 fetch = top_k * 4 if json_filters else top_k
