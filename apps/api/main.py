@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI):
         from apps.api.control import get_control_store
         from apps.api.dependencies import get_raw_db_store, get_raw_vector_store, get_graph_store
         await get_control_store()
+        # Fail fast on a model/index dimension mismatch (would otherwise corrupt the index).
+        from apps.api.dependencies import get_embedding
+        probe = await get_embedding().embed_single("dimension probe")
+        if len(probe) != settings.embedding_dimension:
+            raise RuntimeError(f"embedding model returns {len(probe)} dims but EMBEDDING_DIMENSION="
+                               f"{settings.embedding_dimension}")
         db = await get_raw_db_store()
         if settings.is_production_like and settings.require_rls and hasattr(db, "rls_effective"):
             ok, why = await db.rls_effective()
@@ -92,6 +98,11 @@ def validate_runtime_config() -> None:
         problems.append("APP_SECRET_KEY must be set to a strong secret")
     if not settings.api_key_pepper:
         problems.append("API_KEY_PEPPER must be set (separate from APP_SECRET_KEY)")
+    if settings.embedding_backend == "mock":
+        problems.append("EMBEDDING_BACKEND=mock produces meaningless vectors; configure a real backend")
+    for name in ("memory_backend", "vector_backend"):
+        if getattr(settings, name) == "memory":
+            problems.append(f"{name.upper()}=memory is development-only")
     if problems:
         raise RuntimeError("Unsafe configuration: " + "; ".join(problems))
 

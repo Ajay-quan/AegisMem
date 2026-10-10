@@ -9,7 +9,10 @@ data:
   REQUIRE_RLS: "true"
   VECTOR_BACKEND: pgvector
   GRAPH_BACKEND: none
-  VECTOR_DIMENSION: "384"
+  EMBEDDING_BACKEND: openai
+  EMBEDDING_API_BASE: https://api.openai.com/v1
+  EMBEDDING_MODEL: text-embedding-3-small
+  EMBEDDING_DIMENSION: "1536"
   RATE_LIMIT_BACKEND: redis
   METRICS_ENABLED: "true"
   OTEL_ENABLED: "false"

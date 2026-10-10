@@ -19,11 +19,13 @@ x-api-env: &api-env
   POSTGRES_PASSWORD: ${AEGIS_APP_PASSWORD:?set AEGIS_APP_PASSWORD}
   VECTOR_BACKEND: pgvector
   GRAPH_BACKEND: none
-  VECTOR_DIMENSION: ${VECTOR_DIMENSION:-384}
+  EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:?set EMBEDDING_DIMENSION}
   REDIS_URL: redis://redis:6379/0
   RATE_LIMIT_BACKEND: redis
-  EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-mock}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  EMBEDDING_BACKEND: openai
+  EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-https://api.openai.com/v1}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
 
 services:
   postgres:
@@ -60,7 +62,7 @@ services:
       dockerfile: infra/docker/Dockerfile
     environment:
       AEGIS_MIGRATION_URL: postgresql://aegis_owner:${AEGIS_OWNER_PASSWORD}@postgres:5432/aegismem
-      AEGIS_VECTOR_DIM: ${VECTOR_DIMENSION:-384}
+      AEGIS_VECTOR_DIM: ${EMBEDDING_DIMENSION:?set EMBEDDING_DIMENSION}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -73,7 +75,9 @@ services:
       dockerfile: infra/docker/Dockerfile
     environment: *api-env
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach a host-local embedding server (e.g. Ollama)
     depends_on:
       migrate:
         condition: service_completed_successfully

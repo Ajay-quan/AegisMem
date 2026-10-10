@@ -95,7 +95,6 @@ class Settings(BaseSettings):
     # "memory" = Docker-free local development (nothing persists). Rejected outside development.
     memory_backend: Literal["postgres", "memory"] = "postgres"
     graph_backend: Literal["neo4j", "none"] = "neo4j"
-    vector_dimension: int = 384
 
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
@@ -111,11 +110,18 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
 
     # Embedding
-    embedding_model: str = "BAAI/bge-large-en-v1.5"
-    embedding_backend: Literal["sentence_transformers", "openai", "voyage"] = (
-        "sentence_transformers"
-    )
-    embedding_dimension: int = 1024
+    # "openai" = any OpenAI-compatible /embeddings API: OpenAI, Azure gateways, Voyage, vLLM,
+    # LM Studio, Ollama (http://host:11434/v1). "mock" is development-only (meaningless vectors).
+    embedding_backend: Literal["openai", "sentence_transformers", "mock"] = "mock"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_api_base: str = "https://api.openai.com/v1"
+    embedding_api_key: str = ""  # falls back to OPENAI_API_KEY
+    # Single source of truth for vector size (index, migrations, embedding probe).
+    embedding_dimension: int = 384
+
+    @property
+    def vector_dimension(self) -> int:
+        return self.embedding_dimension
 
     # Default LLM
     default_llm_provider: Literal["openai", "anthropic", "local", "mock"] = "local"

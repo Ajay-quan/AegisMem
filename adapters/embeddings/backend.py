@@ -101,13 +101,64 @@ class MockEmbeddingBackend(EmbeddingBackend):
         return results
 
 
-@lru_cache(maxsize=1)
-def get_embedding_backend(backend: str = "mock", model_name: str = "") -> EmbeddingBackend:
-    """Factory for embedding backends (cached singleton)."""
+class OpenAICompatibleEmbeddingBackend(EmbeddingBackend):
+    """Any OpenAI-compatible ``POST {base}/embeddings`` API (OpenAI, Voyage, vLLM, Ollama /v1, ...).
+
+    Batches requests, retries transient failures, and verifies the returned dimension so a
+    model/index mismatch fails loudly instead of corrupting the vector index.
+    """
+
+    def __init__(self, base_url: str, model: str, api_key: str = "", dimension: int = 0,
+                 batch_size: int = 64, timeout_s: float = 30.0, max_retries: int = 3) -> None:
+        import httpx
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._http = httpx.AsyncClient(base_url=base_url.rstrip("/"), headers=headers, timeout=timeout_s)
+        self._model = model
+        self._dim = dimension
+        self._batch = batch_size
+        self._retries = max_retries
+
+    @property
+    def dimension(self) -> int:
+        return self._dim
+
+    async def _post(self, inputs: list[str]) -> list[list[float]]:
+        import asyncio
+        import httpx
+        for attempt in range(self._retries + 1):
+            try:
+                r = await self._http.post("/embeddings", json={"model": self._model, "input": inputs})
+                if r.status_code in (429, 500, 502, 503, 504) and attempt < self._retries:
+                    await asyncio.sleep(min(8.0, 0.5 * 2 ** attempt))
+                    continue
+                r.raise_for_status()
+                data = sorted(r.json()["data"], key=lambda d: d["index"])
+                return [d["embedding"] for d in data]
+            except (httpx.TransportError,) as e:
+                if attempt >= self._retries:
+                    raise EmbeddingError(f"embedding API unreachable: {e}") from e
+                await asyncio.sleep(min(8.0, 0.5 * 2 ** attempt))
+        raise EmbeddingError("embedding API retries exhausted")
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for i in range(0, len(texts), self._batch):
+            out.extend(await self._post(texts[i:i + self._batch]))
+        for v in out:
+            if self._dim and len(v) != self._dim:
+                raise EmbeddingError(
+                    f"model {self._model} returned {len(v)} dims; EMBEDDING_DIMENSION is {self._dim}")
+        return out
+
+
+@lru_cache(maxsize=8)
+def get_embedding_backend(backend: str = "mock", model_name: str = "", dimension: int = 384,
+                          api_base: str = "", api_key: str = "") -> EmbeddingBackend:
+    """Factory for embedding backends (cached per configuration)."""
+    if backend == "openai":
+        return OpenAICompatibleEmbeddingBackend(api_base, model_name, api_key, dimension)
     if backend == "sentence_transformers":
-        model = model_name or "BAAI/bge-large-en-v1.5"
-        return SentenceTransformerBackend(model_name=model)
-    elif backend == "mock":
-        return MockEmbeddingBackend()
-    else:
-        raise EmbeddingError(f"Unknown embedding backend: {backend}")
+        return SentenceTransformerBackend(model_name=model_name or "BAAI/bge-large-en-v1.5")
+    if backend == "mock":
+        return MockEmbeddingBackend(dim=dimension)
+    raise EmbeddingError(f"Unknown embedding backend: {backend}")

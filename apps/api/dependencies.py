@@ -135,10 +135,7 @@ async def get_raw_vector_store() -> InMemoryVectorStore:
                 port=settings.qdrant_port,
                 collection_name=settings.qdrant_collection,
             )
-            embed_backend = get_embedding_backend(
-                settings.embedding_backend, settings.embedding_model
-            )
-            await qdrant.initialize(embed_backend.dimension)
+            await qdrant.initialize(settings.embedding_dimension)
             _vector_store = qdrant  # type: ignore
             logger.info("Using Qdrant vector store")
         except Exception as e:
@@ -147,8 +144,7 @@ async def get_raw_vector_store() -> InMemoryVectorStore:
                 raise RuntimeError(f"Qdrant unavailable in {settings.app_env}: {e}") from e
             logger.warning(f"Qdrant unavailable ({e}), using in-memory vector store")
             store = InMemoryVectorStore()
-            embed_backend = get_embedding_backend("mock")
-            await store.initialize(embed_backend.dimension)
+            await store.initialize(settings.embedding_dimension)
             _vector_store = store
     return _vector_store
 
@@ -195,11 +191,11 @@ async def get_vector_store(
 
 
 def get_embedding() -> EmbeddingBackend:
-    backend = settings.embedding_backend
-    # In production: use sentence_transformers. In test/dev: use mock
-    if not settings.openai_api_key and not settings.anthropic_api_key:
-        backend = "mock"
-    return get_embedding_backend(backend, settings.embedding_model)
+    """Configured embedding backend. Never silently degrades: mock is development-only."""
+    return get_embedding_backend(
+        settings.embedding_backend, settings.embedding_model, settings.embedding_dimension,
+        settings.embedding_api_base, settings.embedding_api_key or settings.openai_api_key,
+    )
 
 
 def get_llm() -> LLMClient:

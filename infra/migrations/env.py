@@ -24,7 +24,11 @@ url = (
     or os.environ.get("AEGIS_MIGRATION_URL")
     or settings.postgres_url_sync
 )
-config.set_main_option("sqlalchemy.url", url)
+# Pin the sync driver: SQLAlchemy's default for bare "postgresql://" differs across versions
+# (psycopg2 vs psycopg 3); psycopg2-binary is the declared dependency.
+if url.startswith("postgresql://") or url.startswith("postgres://"):
+    url = "postgresql+psycopg2://" + url.split("://", 1)[1]
+config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
