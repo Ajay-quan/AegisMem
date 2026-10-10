@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "aegismem-mcp"
 version = "0.1.0"
 description = "MCP server exposing AegisMem governed memory to any MCP client"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = ["aegismem-client>=0.1.0"]

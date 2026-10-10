@@ -6,15 +6,26 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
-  "engines": { "node": ">=18" },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "typescript": "5.6.3",
     "@types/node": "22.7.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ajay-quan/AegisMem",
+    "directory": "sdk/typescript"
   }
 }

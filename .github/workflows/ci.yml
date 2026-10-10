@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:   # reused by release.yml as the release gate
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -55,6 +56,9 @@ jobs:
         run: |
           pip install -e ".[dev]"
           npm ci --prefix sdk/typescript
+      - uses: azure/setup-helm@v4
+      - name: Helm chart lint
+        run: helm lint --strict infra/helm/aegismem
       - name: TypeScript SDK typecheck
         run: npm run typecheck --prefix sdk/typescript
       - name: Migrations round-trip on Postgres

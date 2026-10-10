@@ -1,0 +1,100 @@
+# Tag-triggered release: `git tag v0.1.0 && git push origin v0.1.0`.
+# One-time setup (repository owner):
+#   * PyPI: add a Trusted Publisher for each project (aegismem, aegismem-client, aegismem-mcp,
+#     aegismem-agents, aegis-audit) -> this repo, workflow release.yml, environment "release".
+#   * npm:  create an automation token and store it as the NPM_TOKEN secret.
+#   * GHCR: nothing; GITHUB_TOKEN publishes images and the Helm chart.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  python-packages:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write   # PyPI trusted publishing (no stored tokens)
+    strategy:
+      matrix:
+        package: [".", "sdk/python", "integrations/mcp", "integrations/frameworks", "audit"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build --outdir dist "${{ matrix.package }}"
+          twine check --strict dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with: { packages-dir: dist }
+
+  npm-package:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
+      - run: npm ci --prefix sdk/typescript
+      - run: npm publish --provenance --access public
+        working-directory: sdk/typescript
+        env: { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" }
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/aegismem-api
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  helm-chart:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Package and push chart (OCI)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm lint --strict infra/helm/aegismem
+          helm package infra/helm/aegismem --version "$VERSION" --app-version "$VERSION"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "aegismem-$VERSION.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"

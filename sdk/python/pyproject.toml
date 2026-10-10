@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "aegismem-client"
 version = "0.1.0"
 description = "Official Python client for AegisMem, the trust layer for agent memory"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = ["httpx>=0.27", "pydantic>=2.6"]
