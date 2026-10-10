@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.aegis
+bench-results
+sdk/typescript/node_modules
+tests
+.env
+.env.*
+!.env.example

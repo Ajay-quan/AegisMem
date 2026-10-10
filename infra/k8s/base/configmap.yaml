@@ -1,0 +1,17 @@
+# Non-secret settings. Secrets come from the `aegismem-secrets` Secret (see secret.example.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegismem-config
+data:
+  APP_ENV: production
+  AUTH_ENABLED: "true"
+  REQUIRE_RLS: "true"
+  VECTOR_BACKEND: pgvector
+  GRAPH_BACKEND: none
+  VECTOR_DIMENSION: "384"
+  RATE_LIMIT_BACKEND: redis
+  METRICS_ENABLED: "true"
+  OTEL_ENABLED: "false"
+  OUTBOX_WORKER_ENABLED: "true"
+  LOG_LEVEL: INFO

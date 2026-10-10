@@ -1,0 +1,33 @@
+# Apply before rolling the Deployment (CI/CD: `kubectl apply -f` job, wait for completion).
+# Runs as the schema owner; the API itself never has DDL rights.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aegismem-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: aegismem
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: aegismem-api
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: AEGIS_MIGRATION_URL
+              valueFrom: { secretKeyRef: { name: aegismem-secrets, key: AEGIS_MIGRATION_URL } }
+            - name: AEGIS_VECTOR_DIM
+              valueFrom: { configMapKeyRef: { name: aegismem-config, key: VECTOR_DIMENSION } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
