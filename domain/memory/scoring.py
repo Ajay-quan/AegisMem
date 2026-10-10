@@ -76,35 +76,41 @@ def compute_importance_heuristic(content: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+def memory_utility(memory: MemoryItem) -> float:
+    """How often this memory was *used* when retrieved: Beta(1,1)-smoothed, 0.5 until feedback.
+
+    Replaces raw access counts, which created a popularity feedback loop: every retrieval raised
+    a memory's score for all future queries (measured on LoCoMo: -27 pts recall@5).
+    """
+    return (memory.successful_retrieval_count + 1) / (memory.retrieval_count + 2)
+
+
 def compute_composite_score(
     semantic_score: float,
     recency_score: float,
     importance_score: float,
-    access_count: int = 0,
+    utility: float = 0.5,
     contradiction_penalty: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> float:
-    """Hybrid retrieval composite score combining multiple signals.
+    """Hybrid score: query relevance dominates; recency, importance and utility break ties.
 
-    Default weights come from ``settings`` but can be overridden per call.
+    Default weights come from ``settings`` but can be overridden per call (learned weights).
     """
     w = weights or {
         "semantic": settings.weight_semantic,
         "recency": settings.weight_recency,
         "importance": settings.weight_importance,
-        "access": settings.weight_access,
+        "utility": settings.weight_utility,
     }
 
-    access_score = math.log1p(access_count) / math.log1p(100)  # normalize
-
     score = (
-        w.get("semantic", 0.40) * semantic_score
-        + w.get("recency", 0.25) * recency_score
-        + w.get("importance", 0.25) * importance_score
-        + w.get("access", 0.10) * access_score
+        w.get("semantic", 0.0) * semantic_score
+        + w.get("recency", 0.0) * recency_score
+        + w.get("importance", 0.0) * importance_score
+        + w.get("utility", 0.0) * utility
     )
 
-    # Apply contradiction penalty 
     if contradiction_penalty > 0:
         score -= contradiction_penalty
 
@@ -174,7 +180,7 @@ def score_memory_for_retrieval(
         semantic_score=semantic_score,
         recency_score=recency,
         importance_score=importance,
-        access_count=memory.access_count,
+        utility=memory_utility(memory),
         contradiction_penalty=contradiction_penalty,
         weights=weights,
     )

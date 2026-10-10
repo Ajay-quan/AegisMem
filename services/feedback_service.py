@@ -18,6 +18,7 @@ from typing import Any
 
 from core.schemas.memory import RetrievalResult
 from domain.learning import OnlineWeightLearner
+from domain.memory.scoring import memory_utility
 from domain.learning.trust_calibrator import memory_source_origin
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def ledger_signals(result: RetrievalResult) -> dict[str, dict[str, float]]:
             "semantic": c.semantic_score,
             "recency": c.recency_score,
             "importance": c.importance_score,
-            "access": min(1.0, math.log1p(c.memory.access_count) / math.log1p(100)),
+            "utility": memory_utility(c.memory),
         }
         for c in result.candidates
     }
@@ -96,11 +97,13 @@ class FeedbackService:
         ledger: RetrievalLedger,
         learner: OnlineWeightLearner,
         trust_calibrator: Any | None = None,
+        risk_model: Any | None = None,
     ) -> None:
         self._db = relational_store
         self._ledger = ledger
         self._learner = learner
         self._calibrator = trust_calibrator
+        self._risk = risk_model
 
     async def submit(
         self,
@@ -137,6 +140,7 @@ class FeedbackService:
                 memory.retrieval_count += 1
                 if was_used:
                     memory.successful_retrieval_count += 1
+                    await self._implicit_benign(memory)
                 await self._db.update_memory(memory)
                 if was_used and self._calibrator is not None and "provenance" in memory.metadata:
                     source, origin = memory_source_origin(memory.metadata, memory.source_type)
@@ -152,3 +156,16 @@ class FeedbackService:
             "learning_active": active,
             "weights": state.to_dict()["weights"],
         }
+
+    async def _implicit_benign(self, memory: Any) -> None:
+        """A memory the agent actually used is weak evidence its content is benign.
+
+        Counters the risk model's selection bias (it otherwise only sees labels for items it
+        held). Once per memory, one low-weight pass, and only for content that passed both
+        screening and the read guard. Measured on aegis-bench `external_injection`: held-out
+        FPR 0.20 -> 0.04-0.09 at unchanged recall.
+        """
+        if self._risk is None or memory.metadata.get("implicit_benign_learned"):
+            return
+        await self._risk.learn(memory.content, malicious=False, implicit=True)
+        memory.metadata["implicit_benign_learned"] = True

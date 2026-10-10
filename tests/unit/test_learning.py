@@ -9,8 +9,8 @@ def _semantic_wins(n: int):
     """Feedback where only high-semantic, low-recency memories get used."""
     ex = []
     for _ in range(n):
-        ex.append(({"semantic": 0.9, "recency": 0.1, "importance": 0.5, "access": 0.1}, True))
-        ex.append(({"semantic": 0.2, "recency": 0.9, "importance": 0.5, "access": 0.1}, False))
+        ex.append(({"semantic": 0.9, "recency": 0.1, "importance": 0.5, "utility": 0.1}, True))
+        ex.append(({"semantic": 0.2, "recency": 0.9, "importance": 0.5, "utility": 0.1}, False))
     return ex
 
 
@@ -21,12 +21,17 @@ class TestOnlineWeightLearner:
         assert await learner.weights_for("u") is None
 
     async def test_learns_toward_useful_signal(self):
+        """When recency (not semantics) predicts usage, weight shifts toward recency."""
         learner = OnlineWeightLearner(min_events=20)
-        await learner.observe("u", _semantic_wins(100))
+        ex = []
+        for _ in range(100):
+            ex.append(({"semantic": 0.5, "recency": 0.95, "importance": 0.5, "utility": 0.5}, True))
+            ex.append(({"semantic": 0.5, "recency": 0.05, "importance": 0.5, "utility": 0.5}, False))
+        await learner.observe("u", ex)
         w = await learner.weights_for("u")
         d = default_weights()
-        assert w["semantic"] > d["semantic"]
-        assert w["recency"] < d["recency"]
+        assert w["recency"] > d["recency"]
+        assert w["semantic"] < d["semantic"]
 
     async def test_weights_stay_on_bounded_simplex(self):
         learner = OnlineWeightLearner(min_events=1, learning_rate=0.5, floor=0.05)

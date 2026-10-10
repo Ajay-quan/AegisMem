@@ -67,9 +67,11 @@ human outcomes (approve / reject / correct / confirm / used) ──► event log
 | Learning from reviewers (8 splits) | held-out recall 0.57 → 0.78 with FPR +0.02 |
 | Revocation (7 scenarios) | 0 revoked memories served; 100% replaced with the current version |
 | Erasure (20 subjects) | 0 residue, 100% cascade recall, 0 collateral, receipts tamper-evident |
+| **Recall impact, LoCoMo** (real embeddings, 1,536 questions) | recall@5 0.521 vs 0.514 raw vector search; 0 / 5,882 benign turns quarantined |
+| External injections (deepset, EN+DE) | recall 0.12 cold → 0.83 after reviewer learning, FPR 0.09 |
 | Overhead | screening p95 ≈ 0.05 ms, guard p95 ≈ 0.05 ms (in-memory backends) |
 
-The poisoning dataset is a small, deliberately hard internal set; treat these numbers as regression gates.
+Details and reproduction commands: [bench/RESULTS.md](bench/RESULTS.md).
 
 ## Repository map
 

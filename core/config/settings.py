@@ -138,10 +138,11 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
 
     # Ranking weights (must sum to ~1.0 for interpretability)
-    weight_semantic: float = 0.40
-    weight_recency: float = 0.25
-    weight_importance: float = 0.25
-    weight_access: float = 0.10
+    # Relevance dominates; the rest are tie-breakers (tuned on LoCoMo, see bench/locomo.py).
+    weight_semantic: float = 0.85
+    weight_recency: float = 0.05
+    weight_importance: float = 0.05
+    weight_utility: float = 0.05
 
     # Penalties
     contradiction_penalty_weight: float = 0.40

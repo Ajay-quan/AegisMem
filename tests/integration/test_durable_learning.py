@@ -109,7 +109,7 @@ class TestRiskModelDurability:
 class TestWeightsDurability:
     async def test_per_user_weights_and_reset_persist(self, store):
         learner = runtime(store).weight_learner("t1", min_events=2)
-        ex = [({"semantic": 0.9, "recency": 0.1, "importance": 0.5, "access": 0.0}, True)] * 5
+        ex = [({"semantic": 0.9, "recency": 0.1, "importance": 0.5, "utility": 0.0}, True)] * 5
         await learner.observe("alice", ex)
         fresh = runtime(store).weight_learner("t1", min_events=2)
         assert (await fresh.state("alice")).events == 5

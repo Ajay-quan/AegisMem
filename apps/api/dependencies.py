@@ -286,10 +286,11 @@ async def get_feedback_service(
     cal: Annotated[TrustCalibrator, Depends(get_calibrator)],
     learner: Annotated[OnlineWeightLearner, Depends(get_learner)],
     ledger: Annotated[SqlRetrievalLedger, Depends(get_ledger)],
+    risk: Annotated[OnlineRiskModel, Depends(get_risk_model)],
 ) -> FeedbackService:
     return FeedbackService(
         relational_store=db, ledger=ledger, learner=learner,
-        trust_calibrator=cal,
+        trust_calibrator=cal, risk_model=risk,
     )
 
 

@@ -295,10 +295,60 @@ async def latency(memories: int = 1000, queries: int = 100) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# 6. External: deepset/prompt-injections (EN + DE), cold start vs. after reviewer learning
+# ---------------------------------------------------------------------------
+
+def _load_external(name: str) -> list[dict[str, Any]]:
+    from bench.harness import DATASETS
+    import json
+    with open(DATASETS / "external" / name) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+async def external_injection(report_rates: tuple[float, ...] = (1.0, 0.5, 0.2),
+                             use_rate: float = 0.5) -> dict[str, Any]:
+    """Out-of-distribution robustness and how much reviewer feedback recovers.
+
+    Train rows stream through ingest. Held items are reviewed (reject/release). Attacks that
+    slipped through are reported as `malicious` at ``report_rate`` (realistic: not every miss
+    is noticed). Held-out test rows are scored before and after, side-effect free.
+    """
+    train = _load_external("deepset_prompt_injections_train.jsonl")
+    test = _load_external("deepset_prompt_injections_test.jsonl")
+    gold = [r["label"] for r in test]
+
+    async def measure(env) -> dict[str, float]:
+        return _rates([await _held(env, r, f"ext-test:{i}") for i, r in enumerate(test)], gold)
+
+    out: dict[str, Any] = {"train": len(train), "test": len(test)}
+    cold = await measure(await build_env())
+    out["cold_recall"], out["cold_fpr"] = cold["recall"], cold["fpr"]
+    for rate in report_rates:
+        env = await build_env()
+        rng = random.Random(13)
+        reviews = 0
+        for i, r in enumerate(train):
+            m = await env.ingest.ingest_text(r["text"], user_id="u", source_type=SourceType.TOOL_OUTPUT,
+                                             metadata={"origin": f"ext-train:{i}"})
+            if m.status == "pending":
+                reviews += 1
+                await (env.outcomes.reject if r["label"] else env.outcomes.release)("u", m.memory_id)
+            elif r["label"] and rng.random() < rate:
+                await env.outcomes.correct("u", m.memory_id, "malicious", note="bench")
+            elif not r["label"] and rng.random() < use_rate:
+                await env.risk.learn(r["text"], malicious=False, implicit=True)  # agent used it
+        after = await measure(env)
+        tag = f"report{int(rate * 100)}"
+        out[f"{tag}_recall"], out[f"{tag}_fpr"], out[f"{tag}_reviews"] = after["recall"], after["fpr"], reviews
+    return out
+
+
 SUITES = {
     "poisoning": poisoning,
     "learning": learning,
     "revocation": revocation,
     "erasure": erasure,
     "latency": latency,
+    "external_injection": external_injection,
 }

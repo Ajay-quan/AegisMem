@@ -114,6 +114,7 @@ class OnlineRiskModel:
         self.model_held_rejected = 0
         self.model_held_released = 0
         self.missed_attacks = 0  # reported after slipping past screening (recall signal)
+        self.implicit_benign = 0  # used-in-practice signals (counter selection bias)
         self.updated_at: str | None = None
         self._anchor_malicious = [self.features(t) for t in SEED_MALICIOUS]
         self._anchor_benign = [self.features(t) for t in SEED_BENIGN]
@@ -156,17 +157,20 @@ class OnlineRiskModel:
         kind = event.get("type", "label")
         if kind == "label":
             y = int(event["y"])
+            passes = 1 if event.get("implicit") else 3
             # A few passes so one reviewer decision visibly moves the model, each paired
             # with rehearsal of an anchor example of the opposite class (experience replay).
             # Reviewer labels are heavily skewed toward attacks; without rehearsal, shared
             # everyday words ("customers", "reply") drift toward risky and FPR climbs.
             # The anchor is chosen deterministically from the event so replay stays exact.
             anchors = self._anchor_benign if y else self._anchor_malicious
-            for k in range(3):
+            for k in range(passes):
                 self._step(event["f"], y)
                 if anchors:
                     self._step(anchors[(sum(event["f"]) + k) % len(anchors)], 1 - y)
             self.examples += 1
+            if event.get("implicit"):
+                self.implicit_benign += 1
             if event.get("held"):
                 if event["y"]:
                     self.model_held_rejected += 1
@@ -187,6 +191,7 @@ class OnlineRiskModel:
             "held_rejected": self.model_held_rejected,
             "held_released": self.model_held_released,
             "missed": self.missed_attacks,
+            "implicit": self.implicit_benign,
             "updated_at": self.updated_at,
         }
 
@@ -206,6 +211,7 @@ class OnlineRiskModel:
         m.model_held_rejected = state["held_rejected"]
         m.model_held_released = state["held_released"]
         m.missed_attacks = state["missed"]
+        m.implicit_benign = state.get("implicit", 0)
         m.updated_at = state["updated_at"]
         return m
 
@@ -248,10 +254,15 @@ class OnlineRiskModel:
 
     async def learn(
         self, text: str, malicious: bool, held_by_model: bool = False, missed: bool = False,
+        implicit: bool = False,
     ) -> None:
+        """``implicit``: weak benign evidence (the agent actually used this memory). One pass
+        instead of three. It counters the selection bias of only ever labelling held items."""
+        if implicit and malicious:
+            raise ValueError("implicit labels are benign-only")
         event = {
             "type": "label", "f": self.features(text), "y": int(malicious),
-            "held": held_by_model, "missed": missed,
+            "held": held_by_model, "missed": missed, "implicit": implicit,
             "at": datetime.now(timezone.utc).isoformat(),
         }
         if self._journal is not None:
@@ -270,6 +281,7 @@ class OnlineRiskModel:
             "model_held_reviewed": held,
             "model_precision": round(self.model_held_rejected / held, 4) if held else None,
             "missed_attacks_reported": self.missed_attacks,
+            "implicit_benign_signals": self.implicit_benign,
             "threshold_at_trust": {str(t): round(self.threshold(t), 4) for t in (0.3, 0.5, 0.9)},
             "top_risk_features": [t for _, t in strongest],
             "updated_at": self.updated_at,

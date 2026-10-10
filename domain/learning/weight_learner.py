@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable
 
 from core.config.settings import settings
 
-SIGNALS: tuple[str, ...] = ("semantic", "recency", "importance", "access")
+SIGNALS: tuple[str, ...] = ("semantic", "recency", "importance", "utility")
 COMPONENT_PREFIX = "weights/"
 
 Journal = Callable[[dict[str, Any]], Awaitable[None]]
@@ -36,7 +36,7 @@ def default_weights() -> dict[str, float]:
         "semantic": settings.weight_semantic,
         "recency": settings.weight_recency,
         "importance": settings.weight_importance,
-        "access": settings.weight_access,
+        "utility": settings.weight_utility,
     }
 
 

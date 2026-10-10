@@ -72,12 +72,12 @@ class TestImportanceHeuristic:
 
 class TestCompositeScore:
     def test_all_ones_returns_one(self):
-        score = compute_composite_score(1.0, 1.0, 1.0, access_count=100)
+        score = compute_composite_score(1.0, 1.0, 1.0, utility=1.0)
         assert score <= 1.0
         assert score > 0.95
 
     def test_all_zeros_returns_zero(self):
-        score = compute_composite_score(0.0, 0.0, 0.0, access_count=0)
+        score = compute_composite_score(0.0, 0.0, 0.0, utility=0.0)
         assert score == 0.0
 
     def test_contradiction_penalty_reduces_score(self):
@@ -86,7 +86,7 @@ class TestCompositeScore:
         assert with_penalty < without
 
     def test_custom_weights(self):
-        weights = {"semantic": 1.0, "recency": 0.0, "importance": 0.0, "access": 0.0}
+        weights = {"semantic": 1.0, "recency": 0.0, "importance": 0.0, "utility": 0.0}
         score = compute_composite_score(0.5, 0.0, 0.0, weights=weights)
         assert abs(score - 0.5) < 0.01
 
