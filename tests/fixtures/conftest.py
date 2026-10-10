@@ -47,18 +47,21 @@ class MockPostgresStore:
         self._logs.append({"memory_id": memory_id, "operation": "purge"})
 
     async def list_memories(self, user_id: str, namespace: str = "", memory_type: str = "",
-                             status: str = "active", limit: int = 50, offset: int = 0) -> list:
+                             status: str = "active", limit: int = 50, offset: int = 0,
+                             tenant_id: str | None = None) -> list:
         results = [
             m for m in self._memories.values()
             if m.user_id == user_id
+            and (tenant_id is None or m.tenant_id == tenant_id)
             and (not status or (m.status if isinstance(m.status, str) else m.status.value) == status)
             and (not namespace or m.namespace == namespace)
             and (not memory_type or (m.memory_type if isinstance(m.memory_type, str) else m.memory_type.value) == memory_type)
         ]
         return results[offset:offset + limit]
 
-    async def count_memories(self, user_id: str, namespace: str = "") -> int:
-        return len([m for m in self._memories.values() if m.user_id == user_id])
+    async def count_memories(self, user_id: str, namespace: str = "", tenant_id: str | None = None) -> int:
+        return len([m for m in self._memories.values() if m.user_id == user_id
+                    and (tenant_id is None or m.tenant_id == tenant_id)])
 
     async def save_fact(self, fact):
         self._facts.append(fact)

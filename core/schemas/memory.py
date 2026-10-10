@@ -85,6 +85,7 @@ class MemoryItem(BaseModel):
     """The canonical memory record. Every memory in AegisMem is a MemoryItem."""
 
     memory_id: str = Field(default_factory=new_id)
+    tenant_id: str = Field(default="default", description="Owning tenant (isolation boundary)")
     namespace: str = Field(..., description="Logical partition (e.g. 'user:123:agent:chat')")
     user_id: str = Field(..., description="Owner user identifier")
     agent_id: str = Field(default="", description="Agent that created this memory")

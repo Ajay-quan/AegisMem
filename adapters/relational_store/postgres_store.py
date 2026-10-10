@@ -23,6 +23,10 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _enum(v: Any) -> str:
+    return v if isinstance(v, str) else v.value
+
+
 class PostgresStore:
     """Async PostgreSQL store for canonical memory records."""
 
@@ -62,6 +66,11 @@ class PostgresStore:
         async with self.session() as sess:
             record = MemoryRecord(
                 memory_id=memory.memory_id,
+                tenant_id=memory.tenant_id,
+                memory_layer=_enum(memory.memory_layer),
+                retrieval_count=memory.retrieval_count,
+                successful_retrieval_count=memory.successful_retrieval_count,
+                contradicted_by=memory.contradicted_by,
                 namespace=memory.namespace,
                 user_id=memory.user_id,
                 agent_id=memory.agent_id,
@@ -101,13 +110,24 @@ class PostgresStore:
             record = await sess.get(MemoryRecord, memory.memory_id)
             if not record:
                 raise MemoryNotFoundError(memory.memory_id)
+            # Persist every mutable field; anything omitted here is silently lost on reload.
             record.content = memory.content
             record.updated_at = utcnow()
-            record.status = memory.status if isinstance(memory.status, str) else memory.status.value
+            record.status = _enum(memory.status)
+            record.memory_layer = _enum(memory.memory_layer)
             record.importance_score = memory.importance_score
+            record.confidence_score = memory.confidence_score
+            record.access_count = memory.access_count
+            record.retrieval_count = memory.retrieval_count
+            record.successful_retrieval_count = memory.successful_retrieval_count
             record.version = memory.version
-            record.contradiction_status = memory.contradiction_status if isinstance(memory.contradiction_status, str) else memory.contradiction_status.value
-            record.extra_metadata = memory.metadata
+            record.contradiction_status = _enum(memory.contradiction_status)
+            record.contradicted_by = list(memory.contradicted_by)
+            record.parent_memory_ids = list(memory.parent_memory_ids)
+            record.valid_from = memory.valid_from
+            record.valid_to = memory.valid_to
+            record.tags = list(memory.tags)
+            record.extra_metadata = dict(memory.metadata)
             await self._log_operation(sess, memory.memory_id, memory.user_id, "update", {})
         return memory
 
@@ -137,6 +157,7 @@ class PostgresStore:
         self,
         user_id: str,
         namespace: str = "",
+        tenant_id: str | None = None,
         memory_type: str = "",
         status: str = "active",
         limit: int = 50,
@@ -144,6 +165,8 @@ class PostgresStore:
     ) -> list[MemoryItem]:
         async with self.session() as sess:
             stmt = select(MemoryRecord).where(MemoryRecord.user_id == user_id)
+            if tenant_id is not None:
+                stmt = stmt.where(MemoryRecord.tenant_id == tenant_id)
             if namespace:
                 stmt = stmt.where(MemoryRecord.namespace == namespace)
             if memory_type:
@@ -155,12 +178,16 @@ class PostgresStore:
             records = result.scalars().all()
             return [self._record_to_schema(r) for r in records]
 
-    async def count_memories(self, user_id: str, namespace: str = "") -> int:
+    async def count_memories(
+        self, user_id: str, namespace: str = "", tenant_id: str | None = None,
+    ) -> int:
         async with self.session() as sess:
             stmt = select(func.count()).select_from(MemoryRecord).where(
                 MemoryRecord.user_id == user_id,
                 MemoryRecord.status == "active",
             )
+            if tenant_id is not None:
+                stmt = stmt.where(MemoryRecord.tenant_id == tenant_id)
             if namespace:
                 stmt = stmt.where(MemoryRecord.namespace == namespace)
             result = await sess.execute(stmt)
@@ -298,6 +325,11 @@ class PostgresStore:
         from core.schemas.memory import MemoryType, MemoryStatus, SourceType, ContradictionStatus
         return MemoryItem(
             memory_id=record.memory_id,
+            tenant_id=record.tenant_id,
+            memory_layer=record.memory_layer,
+            retrieval_count=record.retrieval_count or 0,
+            successful_retrieval_count=record.successful_retrieval_count or 0,
+            contradicted_by=record.contradicted_by or [],
             namespace=record.namespace,
             user_id=record.user_id,
             agent_id=record.agent_id,

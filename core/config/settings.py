@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     dev_control_db_path: str = ".aegis/control.db"
     default_tenant: str = "default"
 
+    # Auth. Disabled only in development; staging/production refuse to boot without it.
+    auth_enabled: bool = False
+    api_key_pepper: str = ""
+
     @property
     def resolved_control_database_url(self) -> str:
         if self.control_database_url:

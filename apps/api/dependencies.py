@@ -22,6 +22,9 @@ from services.contradiction_service import ContradictionService
 from pathlib import Path
 
 from adapters.relational_store.control_store import ControlStore
+from adapters.tenancy import TenantScopedMemoryStore, TenantScopedVectorStore
+from apps.api.auth import Principal, get_principal
+from apps.api.control import get_control_store  # noqa: F401  (re-exported for overrides)
 from services.feedback_service import FeedbackService, SqlRetrievalLedger
 from services.handoff_service import HandoffService
 from services.erasure_service import ErasureService, SqlReceiptStore
@@ -39,22 +42,7 @@ _db_store: PostgresStore | None = None
 _vector_store: InMemoryVectorStore | None = None
 _graph_store: MockGraphStore | None = None
 
-_control_store: ControlStore | None = None
 _runtime: LearningRuntime | None = None
-
-
-async def get_control_store() -> ControlStore:
-    """Durable control plane. Production schema comes from Alembic; dev creates it on boot."""
-    global _control_store
-    if _control_store is None:
-        url = settings.resolved_control_database_url
-        if url.startswith("sqlite"):
-            Path(settings.dev_control_db_path).parent.mkdir(parents=True, exist_ok=True)
-        store = ControlStore(url)
-        if not settings.is_production_like:
-            await store.create_schema()
-        _control_store = store
-    return _control_store
 
 
 async def get_runtime(
@@ -66,9 +54,9 @@ async def get_runtime(
     return _runtime
 
 
-async def get_tenant_id() -> str:
-    """Resolved per request from the authenticated principal (see apps/api/auth.py)."""
-    return settings.default_tenant
+async def get_tenant_id(principal: Annotated[Principal, Depends(get_principal)]) -> str:
+    """Tenant of the authenticated caller; the isolation boundary for every store."""
+    return principal.tenant_id
 
 
 async def get_calibrator(
@@ -106,7 +94,7 @@ async def get_receipt_store(
     return SqlReceiptStore(control, tenant)
 
 
-async def get_db_store() -> PostgresStore:
+async def get_raw_db_store() -> PostgresStore:
     global _db_store
     if _db_store is None:
         _db_store = PostgresStore(settings.postgres_url)
@@ -114,7 +102,7 @@ async def get_db_store() -> PostgresStore:
     return _db_store
 
 
-async def get_vector_store() -> InMemoryVectorStore:
+async def get_raw_vector_store() -> InMemoryVectorStore:
     global _vector_store
     if _vector_store is None:
         # Try Qdrant first, fall back to in-memory
@@ -163,6 +151,21 @@ async def get_graph_store() -> MockGraphStore:
             await mock.connect()
             _graph_store = mock
     return _graph_store
+
+
+async def get_db_store(
+    raw: Annotated[PostgresStore, Depends(get_raw_db_store)],
+    tenant: Annotated[str, Depends(get_tenant_id)],
+) -> TenantScopedMemoryStore:
+    """Every service and route sees only the caller's tenant."""
+    return TenantScopedMemoryStore(raw, tenant)
+
+
+async def get_vector_store(
+    raw: Annotated[InMemoryVectorStore, Depends(get_raw_vector_store)],
+    tenant: Annotated[str, Depends(get_tenant_id)],
+) -> TenantScopedVectorStore:
+    return TenantScopedVectorStore(raw, tenant)
 
 
 def get_embedding() -> EmbeddingBackend:
