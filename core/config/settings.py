@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Qdrant
+    # Storage topology. "pgvector" + graph "none" = single-store mode (one Postgres).
+    vector_backend: Literal["qdrant", "pgvector", "memory"] = "qdrant"
+    graph_backend: Literal["neo4j", "none"] = "neo4j"
+    vector_dimension: int = 384
+
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     qdrant_collection: str = "aegismem_memories"

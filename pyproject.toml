@@ -25,6 +25,7 @@ dependencies = [
     "asyncpg>=0.29.0",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.0",
+    "pgvector>=0.3.0",
     "psycopg2-binary>=2.9.9",
     # Cache / queue
     "redis>=5.0.3",

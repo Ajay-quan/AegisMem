@@ -22,6 +22,8 @@ from services.contradiction_service import ContradictionService
 from pathlib import Path
 
 from adapters.relational_store.control_store import ControlStore
+from adapters.graph_store.null_store import NullGraphStore
+from adapters.vector_store.pgvector_store import PgVectorStore
 from adapters.tenancy import TenantScopedMemoryStore, TenantScopedVectorStore
 from apps.api.auth import Principal, get_principal
 from apps.api.control import get_control_store  # noqa: F401  (re-exported for overrides)
@@ -105,7 +107,21 @@ async def get_raw_db_store() -> PostgresStore:
 async def get_raw_vector_store() -> InMemoryVectorStore:
     global _vector_store
     if _vector_store is None:
-        # Try Qdrant first, fall back to in-memory
+        backend = settings.vector_backend
+        if backend == "pgvector":
+            store = PgVectorStore(settings.postgres_url)
+            await store.initialize(settings.vector_dimension)
+            _vector_store = store  # type: ignore
+            logger.info("Using pgvector (single-store mode)")
+            return _vector_store
+        if backend == "memory":
+            if settings.is_production_like:
+                raise RuntimeError("vector_backend=memory is not allowed in staging/production")
+            store = InMemoryVectorStore()
+            await store.initialize(settings.vector_dimension)
+            _vector_store = store
+            return _vector_store
+        # Try Qdrant first, fall back to in-memory (development only)
         try:
             qdrant = QdrantStore(
                 host=settings.qdrant_host,
@@ -132,6 +148,8 @@ async def get_raw_vector_store() -> InMemoryVectorStore:
 
 async def get_graph_store() -> MockGraphStore:
     global _graph_store
+    if _graph_store is None and settings.graph_backend == "none":
+        _graph_store = NullGraphStore()  # type: ignore
     if _graph_store is None:
         try:
             from adapters.graph_store.neo4j_store import GraphStore as Neo4jStore

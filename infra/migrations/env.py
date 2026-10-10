@@ -11,7 +11,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from adapters.relational_store import control_models  # noqa: F401  (register tables)
+from adapters.relational_store import control_models, vector_models  # noqa: F401  (register tables)
 from adapters.relational_store.models import Base
 from core.config.settings import settings
 

@@ -213,6 +213,6 @@ class ErasureService:
             name: {"checked": len(ids), "residual": r, "clean": not r}
             for name, r in residual.items()
         }
-        if self._graph is None:
+        if self._graph is None or getattr(self._graph, "configured", True) is False:
             stores["graph"] = {"checked": 0, "residual": [], "clean": True, "note": "not configured"}
         return stores

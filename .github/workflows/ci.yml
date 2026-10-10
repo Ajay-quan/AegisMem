@@ -18,7 +18,7 @@ jobs:
         python: ["3.11", "3.13"]
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: aegis
           POSTGRES_PASSWORD: aegis
