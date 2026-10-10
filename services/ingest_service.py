@@ -91,6 +91,7 @@ class IngestionService:
                 await self._graph.create_memory_node(
                     memory.memory_id,
                     {
+                        "tenant_id": memory.tenant_id,
                         "user_id": memory.user_id,
                         "memory_type": memory.memory_type,
                         "importance": memory.importance_score,

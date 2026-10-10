@@ -133,3 +133,21 @@ class TestLedgerAndReceipts:
         await SqlReceiptStore(store, "t1").put(receipt)
         assert await SqlReceiptStore(store, "t1").get("rc1") == receipt
         assert await SqlReceiptStore(store, "t2").get("rc1") is None
+
+
+class TestOutboxClaims:
+    async def test_concurrent_workers_get_disjoint_batches(self, store):
+        for i in range(40):
+            await store.enqueue_outbox("t1", f"m{i}", "upsert")
+        a, b = await asyncio.gather(store.due_outbox(25), store.due_outbox(25))
+        ids_a, ids_b = {r.seq for r in a}, {r.seq for r in b}
+        assert not ids_a & ids_b and len(ids_a | ids_b) == 40
+
+    async def test_expired_lease_is_reclaimed(self, store, monkeypatch):
+        await store.enqueue_outbox("t1", "m1", "upsert")
+        assert len(await store.due_outbox(10, lease_seconds=60)) == 1
+        assert await store.due_outbox(10) == []  # leased, not due
+        from adapters.relational_store import control_store as cs
+        from datetime import datetime, timedelta, timezone
+        monkeypatch.setattr(cs, "_now", lambda: datetime.now(timezone.utc) + timedelta(minutes=5))
+        assert len(await store.due_outbox(10)) == 1  # worker died; lease expired

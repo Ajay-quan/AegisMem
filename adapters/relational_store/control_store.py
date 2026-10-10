@@ -1,6 +1,7 @@
 """Async SQL repository for control-plane state (works on Postgres and SQLite)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -34,6 +35,8 @@ class ControlStore:
             engine = create_async_engine(database_url, **kwargs)
         self._engine = engine
         self._sessions = async_sessionmaker(engine, expire_on_commit=False)
+        # SQLite has no row locks; it is a single-process dev backend, so serialize claims.
+        self._claim_lock = asyncio.Lock()
 
     async def create_schema(self) -> None:
         """Dev/test only. Production schema is managed by Alembic migrations."""
@@ -251,17 +254,33 @@ class ControlStore:
             res = await s.execute(
                 update(OutboxRecord)
                 .where(OutboxRecord.tenant_id == tenant_id, OutboxRecord.memory_id == memory_id,
-                       OutboxRecord.state == "pending", OutboxRecord.op.in_(ops))
+                       OutboxRecord.state.in_(("pending", "leased")), OutboxRecord.op.in_(ops))
                 .values(state="cancelled"))
             return res.rowcount or 0
 
-    async def due_outbox(self, limit: int = 100) -> list[OutboxRecord]:
-        async with self._sessions() as s:
-            return list((await s.execute(
-                select(OutboxRecord)
-                .where(OutboxRecord.state == "pending", OutboxRecord.next_attempt_at <= _now())
-                .order_by(OutboxRecord.seq).limit(limit)
-            )).scalars())
+    async def due_outbox(self, limit: int = 100, lease_seconds: int = 120) -> list[OutboxRecord]:
+        """Claim due work exclusively. Postgres: FOR UPDATE SKIP LOCKED, so concurrent workers
+        on different replicas get disjoint batches. Claimed rows are leased; a crashed worker's
+        lease expires and the rows become due again (``next_attempt_at`` doubles as the lease)."""
+        if self._engine.dialect.name != "postgresql":
+            async with self._claim_lock:
+                return await self._claim(limit, lease_seconds)
+        return await self._claim(limit, lease_seconds)
+
+    async def _claim(self, limit: int, lease_seconds: int) -> list[OutboxRecord]:
+        now = _now()
+        async with self._sessions.begin() as s:
+            stmt = (select(OutboxRecord)
+                    .where(OutboxRecord.state.in_(("pending", "leased")),
+                           OutboxRecord.next_attempt_at <= now)
+                    .order_by(OutboxRecord.seq).limit(limit))
+            if self._engine.dialect.name == "postgresql":
+                stmt = stmt.with_for_update(skip_locked=True)
+            rows = list((await s.execute(stmt)).scalars())
+            for r in rows:
+                r.state = "leased"
+                r.next_attempt_at = now + timedelta(seconds=lease_seconds)
+            return rows
 
     async def finish_outbox(self, seq: int) -> None:
         async with self._sessions.begin() as s:
@@ -277,6 +296,7 @@ class ControlStore:
             if rec.attempts >= max_attempts:
                 rec.state = "dead"
             else:
+                rec.state = "pending"
                 rec.next_attempt_at = _now() + timedelta(seconds=min(3600, 2 ** rec.attempts))
             return rec.state
 
