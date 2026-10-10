@@ -13,7 +13,7 @@ COPY core ./core
 COPY domain ./domain
 COPY services ./services
 COPY infra ./infra
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install ".[otel]"
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install ".[otel,llm]"
 
 FROM python:3.12-slim AS runtime
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
