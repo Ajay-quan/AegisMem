@@ -44,6 +44,20 @@ class InMemoryReceiptStore:
         return self._receipts.get(receipt_id)
 
 
+class SqlReceiptStore:
+    """Durable, tenant-scoped receipt storage."""
+
+    def __init__(self, store: Any, tenant_id: str) -> None:
+        self._store = store
+        self._tenant = tenant_id
+
+    async def put(self, receipt: dict[str, Any]) -> None:
+        await self._store.put_receipt(self._tenant, receipt)
+
+    async def get(self, receipt_id: str) -> dict[str, Any] | None:
+        return await self._store.get_receipt(self._tenant, receipt_id)
+
+
 class ErasureService:
     def __init__(
         self,

@@ -102,7 +102,7 @@ class RetrievalService:
             latency_ms=latency_ms,
         )
         if self._ledger is not None:
-            self._ledger.record(result)
+            await self._ledger.record(result)
         return result
 
     async def _semantic_search(

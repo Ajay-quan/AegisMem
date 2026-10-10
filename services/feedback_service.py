@@ -30,30 +30,59 @@ class LedgerEntry:
     consumed: bool = False
 
 
+def ledger_signals(result: RetrievalResult) -> dict[str, dict[str, float]]:
+    return {
+        c.memory.memory_id: {
+            "semantic": c.semantic_score,
+            "recency": c.recency_score,
+            "importance": c.importance_score,
+            "access": min(1.0, math.log1p(c.memory.access_count) / math.log1p(100)),
+        }
+        for c in result.candidates
+    }
+
+
 class RetrievalLedger:
-    """Bounded LRU of recent retrievals, keyed by retrieval_id."""
+    """In-process bounded LRU of recent retrievals (dev/test). Production: ``SqlRetrievalLedger``."""
 
     def __init__(self, capacity: int = 10_000) -> None:
         self._capacity = capacity
         self._entries: OrderedDict[str, LedgerEntry] = OrderedDict()
 
-    def record(self, result: RetrievalResult) -> None:
-        signals = {
-            c.memory.memory_id: {
-                "semantic": c.semantic_score,
-                "recency": c.recency_score,
-                "importance": c.importance_score,
-                "access": min(1.0, math.log1p(c.memory.access_count) / math.log1p(100)),
-            }
-            for c in result.candidates
-        }
-        self._entries[result.retrieval_id] = LedgerEntry(result.query.user_id, signals)
+    async def record(self, result: RetrievalResult) -> None:
+        self._entries[result.retrieval_id] = LedgerEntry(result.query.user_id, ledger_signals(result))
         self._entries.move_to_end(result.retrieval_id)
         while len(self._entries) > self._capacity:
             self._entries.popitem(last=False)
 
-    def get(self, retrieval_id: str) -> LedgerEntry | None:
+    async def get(self, retrieval_id: str) -> LedgerEntry | None:
         return self._entries.get(retrieval_id)
+
+    async def consume(self, retrieval_id: str) -> bool:
+        entry = self._entries.get(retrieval_id)
+        if entry is None or entry.consumed:
+            return False
+        entry.consumed = True
+        return True
+
+
+class SqlRetrievalLedger:
+    """Durable, tenant-scoped ledger; ``consume`` is atomic across replicas."""
+
+    def __init__(self, store: Any, tenant_id: str) -> None:
+        self._store = store
+        self._tenant = tenant_id
+
+    async def record(self, result: RetrievalResult) -> None:
+        await self._store.put_ledger(self._tenant, result.retrieval_id, result.query.user_id,
+                                     ledger_signals(result))
+
+    async def get(self, retrieval_id: str) -> LedgerEntry | None:
+        row = await self._store.get_ledger(self._tenant, retrieval_id)
+        return LedgerEntry(row["user_id"], row["signals"], row["consumed"]) if row else None
+
+    async def consume(self, retrieval_id: str) -> bool:
+        return await self._store.consume_ledger(self._tenant, retrieval_id)
 
 
 class FeedbackError(ValueError):
@@ -83,7 +112,7 @@ class FeedbackService:
 
         Each retrieval accepts feedback once, so retries cannot double-train.
         """
-        entry = self._ledger.get(retrieval_id)
+        entry = await self._ledger.get(retrieval_id)
         if entry is None:
             raise FeedbackError("unknown or expired retrieval_id")
         if entry.user_id != user_id:
@@ -95,6 +124,9 @@ class FeedbackService:
         unknown = used - entry.signals.keys()
         if unknown:
             raise FeedbackError(f"memory ids not in this retrieval: {sorted(unknown)}")
+
+        if not await self._ledger.consume(retrieval_id):  # atomic: concurrent replays lose
+            raise FeedbackError("feedback already submitted for this retrieval")
 
         examples = []
         for memory_id, signals in entry.signals.items():
@@ -112,7 +144,6 @@ class FeedbackService:
             except Exception as e:
                 logger.warning(f"Feedback counter update failed for {memory_id}: {e}")
 
-        entry.consumed = True
         state = await self._learner.observe(user_id, examples)
         active = state.events >= self._learner.min_events
         return {

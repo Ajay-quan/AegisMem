@@ -23,6 +23,8 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
     "asyncpg>=0.29.0",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.0.0",
     "psycopg2-binary>=2.9.9",
     # Cache / queue
     "redis>=5.0.3",

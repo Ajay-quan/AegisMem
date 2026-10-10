@@ -19,9 +19,13 @@ from services.retrieve_service import RetrievalService
 from services.update_service import UpdateService
 from services.reflect_service import ReflectionService
 from services.contradiction_service import ContradictionService
-from services.feedback_service import FeedbackService, RetrievalLedger
+from pathlib import Path
+
+from adapters.relational_store.control_store import ControlStore
+from services.feedback_service import FeedbackService, SqlRetrievalLedger
 from services.handoff_service import HandoffService
-from services.erasure_service import ErasureService, InMemoryReceiptStore
+from services.erasure_service import ErasureService, SqlReceiptStore
+from services.learning_runtime import LearningRuntime
 from domain.learning import OnlineWeightLearner
 from domain.learning.trust_calibrator import TrustCalibrator
 from domain.learning.risk_model import OnlineRiskModel
@@ -35,33 +39,71 @@ _db_store: PostgresStore | None = None
 _vector_store: InMemoryVectorStore | None = None
 _graph_store: MockGraphStore | None = None
 
-# Continual-learning state (process-local until the Postgres store lands; see ROADMAP P1).
-_learner = OnlineWeightLearner()
-_ledger = RetrievalLedger()
-# Erasure receipts (process-local until persisted; see project_log.md).
-_receipts = InMemoryReceiptStore()
-# Outcome-calibrated source trust, shared across users (process-local until persisted).
-_calibrator = TrustCalibrator()
+_control_store: ControlStore | None = None
+_runtime: LearningRuntime | None = None
 
 
-def get_calibrator() -> TrustCalibrator:
-    return _calibrator
+async def get_control_store() -> ControlStore:
+    """Durable control plane. Production schema comes from Alembic; dev creates it on boot."""
+    global _control_store
+    if _control_store is None:
+        url = settings.resolved_control_database_url
+        if url.startswith("sqlite"):
+            Path(settings.dev_control_db_path).parent.mkdir(parents=True, exist_ok=True)
+        store = ControlStore(url)
+        if not settings.is_production_like:
+            await store.create_schema()
+        _control_store = store
+    return _control_store
 
 
-# Self-improving write-risk model trained by reviewer decisions (process-local until persisted).
-_risk_model = OnlineRiskModel()
+async def get_runtime(
+    control: Annotated[ControlStore, Depends(get_control_store)],
+) -> LearningRuntime:
+    global _runtime
+    if _runtime is None:
+        _runtime = LearningRuntime(control, hash_secret=settings.app_secret_key)
+    return _runtime
 
 
-def get_risk_model() -> OnlineRiskModel:
-    return _risk_model
+async def get_tenant_id() -> str:
+    """Resolved per request from the authenticated principal (see apps/api/auth.py)."""
+    return settings.default_tenant
 
 
-def get_learner() -> OnlineWeightLearner:
-    return _learner
+async def get_calibrator(
+    tenant: Annotated[str, Depends(get_tenant_id)],
+    runtime: Annotated[LearningRuntime, Depends(get_runtime)],
+) -> TrustCalibrator:
+    return await runtime.trust(tenant)
 
 
-def get_ledger() -> RetrievalLedger:
-    return _ledger
+async def get_risk_model(
+    tenant: Annotated[str, Depends(get_tenant_id)],
+    runtime: Annotated[LearningRuntime, Depends(get_runtime)],
+) -> OnlineRiskModel:
+    return await runtime.risk(tenant)
+
+
+async def get_learner(
+    tenant: Annotated[str, Depends(get_tenant_id)],
+    runtime: Annotated[LearningRuntime, Depends(get_runtime)],
+) -> OnlineWeightLearner:
+    return runtime.weight_learner(tenant)
+
+
+async def get_ledger(
+    tenant: Annotated[str, Depends(get_tenant_id)],
+    control: Annotated[ControlStore, Depends(get_control_store)],
+) -> SqlRetrievalLedger:
+    return SqlRetrievalLedger(control, tenant)
+
+
+async def get_receipt_store(
+    tenant: Annotated[str, Depends(get_tenant_id)],
+    control: Annotated[ControlStore, Depends(get_control_store)],
+) -> SqlReceiptStore:
+    return SqlReceiptStore(control, tenant)
 
 
 async def get_db_store() -> PostgresStore:
@@ -89,6 +131,9 @@ async def get_vector_store() -> InMemoryVectorStore:
             _vector_store = qdrant  # type: ignore
             logger.info("Using Qdrant vector store")
         except Exception as e:
+            if settings.is_production_like:
+                # Fail closed: an in-memory index would silently lose writes on restart.
+                raise RuntimeError(f"Qdrant unavailable in {settings.app_env}: {e}") from e
             logger.warning(f"Qdrant unavailable ({e}), using in-memory vector store")
             store = InMemoryVectorStore()
             embed_backend = get_embedding_backend("mock")
@@ -111,6 +156,8 @@ async def get_graph_store() -> MockGraphStore:
             _graph_store = store  # type: ignore
             logger.info("Using Neo4j graph store")
         except Exception as e:
+            if settings.is_production_like:
+                raise RuntimeError(f"Neo4j unavailable in {settings.app_env}: {e}") from e
             logger.warning(f"Neo4j unavailable ({e}), using mock graph store")
             mock = MockGraphStore()
             await mock.connect()
@@ -157,13 +204,15 @@ async def get_retrieve_service(
     db: Annotated[PostgresStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
     cal: Annotated[TrustCalibrator, Depends(get_calibrator)],
+    learner: Annotated[OnlineWeightLearner, Depends(get_learner)],
+    ledger: Annotated[SqlRetrievalLedger, Depends(get_ledger)],
 ) -> RetrievalService:
     return RetrievalService(
         relational_store=db,
         vector_store=vs,
         embedding_backend=get_embedding(),
-        learner=get_learner(),
-        ledger=get_ledger(),
+        learner=learner,
+        ledger=ledger,
         guard=MemoryGuard(db, trust_calibrator=cal),
     )
 
@@ -210,9 +259,11 @@ async def get_contradiction_service(
 async def get_feedback_service(
     db: Annotated[PostgresStore, Depends(get_db_store)],
     cal: Annotated[TrustCalibrator, Depends(get_calibrator)],
+    learner: Annotated[OnlineWeightLearner, Depends(get_learner)],
+    ledger: Annotated[SqlRetrievalLedger, Depends(get_ledger)],
 ) -> FeedbackService:
     return FeedbackService(
-        relational_store=db, ledger=get_ledger(), learner=get_learner(),
+        relational_store=db, ledger=ledger, learner=learner,
         trust_calibrator=cal,
     )
 
@@ -228,13 +279,14 @@ async def get_erasure_service(
     db: Annotated[PostgresStore, Depends(get_db_store)],
     vs: Annotated[InMemoryVectorStore, Depends(get_vector_store)],
     graph: Annotated[MockGraphStore, Depends(get_graph_store)],
+    receipts: Annotated[SqlReceiptStore, Depends(get_receipt_store)],
 ) -> ErasureService:
     return ErasureService(
         relational_store=db,
         vector_store=vs,
         embedding_backend=get_embedding(),
         graph_store=graph,
-        receipt_store=_receipts,
+        receipt_store=receipts,
     )
 
 

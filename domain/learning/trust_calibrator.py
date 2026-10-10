@@ -14,17 +14,23 @@ Each source (``user_message``, ``tool_output``...) and each origin within it (``
 ``domain:reddit.com``) has a Beta posterior. Origins shrink toward their source, so a brand-new
 origin starts at the source's learned trust, not a hard-coded constant.
 
-Trust is learned **per deployment, across users**: one rejection of a poisoned domain protects
-every user. The guard applies learned trust *retroactively*, so memories already stored from a
-newly distrusted origin stop being served immediately, without a rewrite or re-index.
+Trust is learned **per tenant, across that tenant's users**: one rejection of a poisoned domain
+protects every user. The guard applies learned trust *retroactively*, so memories already stored
+from a newly distrusted origin stop being served immediately.
+
+Persistence: the calibrator is a deterministic state machine. ``record`` turns an outcome into an
+event; with a journal attached the event is durably appended first and then applied through
+replay (see ``services/learning_runtime.py``), so every replica converges on identical state.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from domain.integrity.provenance import DEFAULT_TRUST, SOURCE_TRUST
+
+COMPONENT = "trust"
 
 # (alpha increment, beta increment) per outcome.
 EVENT_WEIGHTS: dict[str, tuple[float, float]] = {
@@ -35,13 +41,15 @@ EVENT_WEIGHTS: dict[str, tuple[float, float]] = {
     "used": (0.25, 0.0),
 }
 
+Journal = Callable[[dict[str, Any]], Awaitable[None]]
+
 
 @dataclass
 class BetaStat:
     alpha: float
     beta: float
     events: int = 0
-    updated_at: datetime | None = None
+    updated_at: str | None = None
 
     @property
     def mean(self) -> float:
@@ -52,82 +60,91 @@ def _key(source: str, origin: str = "") -> str:
     return f"{source}|{origin}" if origin else source
 
 
-class InMemoryTrustStore:
-    def __init__(self) -> None:
-        self._stats: dict[str, BetaStat] = {}
-
-    async def get(self, key: str) -> BetaStat | None:
-        return self._stats.get(key)
-
-    async def put(self, key: str, stat: BetaStat) -> None:
-        self._stats[key] = stat
-
-    async def items(self) -> list[tuple[str, BetaStat]]:
-        return list(self._stats.items())
-
-
 class TrustCalibrator:
-    def __init__(self, store: InMemoryTrustStore | None = None, prior_strength: float = 10.0) -> None:
-        self._store = store or InMemoryTrustStore()
+    def __init__(self, prior_strength: float = 10.0, journal: Journal | None = None) -> None:
         self.k = prior_strength
+        self._stats: dict[str, BetaStat] = {}
+        self._journal = journal
 
-    async def _source_stat(self, source: str) -> BetaStat:
-        stat = await self._store.get(_key(source))
+    # -- state machine --------------------------------------------------
+
+    def _source_stat(self, source: str) -> BetaStat:
+        stat = self._stats.get(_key(source))
         if stat is None:
             p = SOURCE_TRUST.get(source, DEFAULT_TRUST)
             stat = BetaStat(alpha=p * self.k, beta=(1 - p) * self.k)
         return stat
 
-    async def _origin_stat(self, source: str, origin: str) -> BetaStat:
-        stat = await self._store.get(_key(source, origin))
+    def _origin_stat(self, source: str, origin: str) -> BetaStat:
+        stat = self._stats.get(_key(source, origin))
         if stat is None:
-            p = (await self._source_stat(source)).mean
+            p = self._source_stat(source).mean
             stat = BetaStat(alpha=p * self.k, beta=(1 - p) * self.k)
         return stat
 
-    async def trust(self, source: str, origin: str = "") -> float:
-        stat = await (self._origin_stat(source, origin) if origin else self._source_stat(source))
-        return stat.mean
-
-    async def record(self, source: str, origin: str, event: str, weight: float = 1.0) -> float:
-        """Apply an outcome. Updates the origin and (more weakly) its parent source."""
-        if event not in EVENT_WEIGHTS:
-            raise ValueError(f"unknown trust event: {event}")
-        da, db = EVENT_WEIGHTS[event]
-        now = datetime.now(timezone.utc)
+    def apply(self, event: dict[str, Any]) -> None:
+        source, origin = event["source"], event.get("origin", "")
+        da, db = EVENT_WEIGHTS[event["event"]]
+        weight, at = float(event.get("weight", 1.0)), event.get("at")
 
         # Source-level learns at half rate when an origin is known: one bad domain
         # should not condemn every tool output.
         src_w = weight * (0.5 if origin else 1.0)
-        src = await self._source_stat(source)
+        src = self._source_stat(source)
         src.alpha += da * src_w
         src.beta += db * src_w
         src.events += 1
-        src.updated_at = now
-        await self._store.put(_key(source), src)
+        src.updated_at = at
+        self._stats[_key(source)] = src
 
-        if not origin:
-            return src.mean
-        org = await self._origin_stat(source, origin)
-        org.alpha += da * weight
-        org.beta += db * weight
-        org.events += 1
-        org.updated_at = now
-        await self._store.put(_key(source, origin), org)
-        return org.mean
+        if origin:
+            org = self._origin_stat(source, origin)
+            org.alpha += da * weight
+            org.beta += db * weight
+            org.events += 1
+            org.updated_at = at
+            self._stats[_key(source, origin)] = org
+
+    def to_state(self) -> dict[str, Any]:
+        return {"k": self.k, "stats": {k: vars(v) for k, v in self._stats.items()}}
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any] | None, journal: Journal | None = None) -> "TrustCalibrator":
+        cal = cls(prior_strength=(state or {}).get("k", 10.0), journal=journal)
+        for k, v in ((state or {}).get("stats") or {}).items():
+            cal._stats[k] = BetaStat(**v)
+        return cal
+
+    # -- public API -----------------------------------------------------
+
+    async def trust(self, source: str, origin: str = "") -> float:
+        return (self._origin_stat(source, origin) if origin else self._source_stat(source)).mean
+
+    async def record(self, source: str, origin: str, event: str, weight: float = 1.0) -> float:
+        """Record an outcome. Returns the updated trust for (source, origin)."""
+        if event not in EVENT_WEIGHTS:
+            raise ValueError(f"unknown trust event: {event}")
+        ev = {
+            "source": source, "origin": origin or "", "event": event, "weight": weight,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        if self._journal is not None:
+            await self._journal(ev)  # append durably, then applied via replay
+        else:
+            self.apply(ev)
+        return await self.trust(source, origin)
 
     async def snapshot(self) -> list[dict[str, Any]]:
         rows = []
-        for key, s in await self._store.items():
+        for key, s in self._stats.items():
             source, _, origin = key.partition("|")
-            prior = SOURCE_TRUST.get(source, DEFAULT_TRUST)
             rows.append({
                 "source": source,
                 "origin": origin,
                 "trust": round(s.mean, 4),
-                "default_trust": prior,
+                "default_trust": SOURCE_TRUST.get(source, DEFAULT_TRUST),
                 "events": s.events,
-                "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+                "updated_at": s.updated_at,
             })
         rows.sort(key=lambda r: r["trust"])
         return rows

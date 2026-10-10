@@ -41,6 +41,24 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    # Control plane (learning event log, receipts, ledger, API keys).
+    # Empty -> Postgres in staging/production, a local SQLite file in development.
+    control_database_url: str = ""
+    dev_control_db_path: str = ".aegis/control.db"
+    default_tenant: str = "default"
+
+    @property
+    def resolved_control_database_url(self) -> str:
+        if self.control_database_url:
+            return self.control_database_url
+        if self.app_env == "development":
+            return f"sqlite+aiosqlite:///{self.dev_control_db_path}"
+        return self.postgres_url
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.app_env in ("staging", "production")
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 

@@ -58,11 +58,11 @@ class OutcomeService:
         self._erase = erasure_service
         self._risk = risk_model
 
-    def _train_risk(self, m: Any, malicious: bool) -> None:
+    async def _train_risk(self, m: Any, malicious: bool, missed: bool = False) -> None:
         if self._risk is None:
             return
         held_by_model = (m.metadata.get("quarantine") or {}).get("trigger") == "model"
-        self._risk.learn(m.content, malicious=malicious, held_by_model=held_by_model)
+        await self._risk.learn(m.content, malicious=malicious, held_by_model=held_by_model, missed=missed)
 
     async def _owned(self, memory_id: str, user_id: str, status: str | None = None) -> Any:
         try:
@@ -131,9 +131,7 @@ class OutcomeService:
 
     async def _report_missed_attack(self, m: Any, note: str) -> dict[str, Any]:
         learned = await self._learn(m, "quarantine_rejected")
-        self._train_risk(m, malicious=True)  # before erasure; content is gone after
-        if self._risk is not None:
-            self._risk.missed_attacks += 1
+        await self._train_risk(m, malicious=True, missed=True)  # before erasure; content is gone after
         receipt = None
         if self._erase is not None:
             receipt = await self._erase.forget(
@@ -175,7 +173,7 @@ class OutcomeService:
         m.confidence_score = min(1.0, m.confidence_score + 0.1)
         m.metadata["confirmed_at"] = _now()
         await self._db.update_memory(m)
-        self._train_risk(m, malicious=False)
+        await self._train_risk(m, malicious=False)
         return {"memory_id": memory_id, "source_trust_after": await self._learn(m, "confirmed")}
 
     # ------------------------------------------------------------------
@@ -188,7 +186,7 @@ class OutcomeService:
         m.metadata.setdefault("quarantine", {})["released_at"] = _now()
         await self._db.update_memory(m)
         await self._vs.update_payload(memory_id, {"status": "active"})
-        self._train_risk(m, malicious=False)
+        await self._train_risk(m, malicious=False)
         return {
             "memory_id": memory_id,
             "status": "active",
@@ -199,7 +197,7 @@ class OutcomeService:
         """Reject held content: learn from it, then erase it with a receipt."""
         m = await self._owned(memory_id, user_id, status="pending")
         learned = await self._learn(m, "quarantine_rejected")
-        self._train_risk(m, malicious=True)  # train before erasure; content is gone after
+        await self._train_risk(m, malicious=True)  # train before erasure; content is gone after
         receipt = None
         if self._erase is not None:
             receipt = await self._erase.forget(

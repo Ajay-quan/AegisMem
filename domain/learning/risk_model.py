@@ -17,17 +17,24 @@ It is seeded with a small built-in corpus so it is useful on day one. Then:
     held (false positives cost reviewer time), it rises; if they keep rejecting, it falls.
   * Every score is explainable: the n-grams that pushed it up are returned with the quarantine.
 
-Pure Python with no external ML dependency, deterministic (crc32 hashing, never ``hash()``), and
-inexpensive enough to run on every write.
+Pure Python with no external ML dependency, deterministic, and inexpensive enough to run on every write.
+
+Privacy: features are hashed with a per-tenant secret (keyed BLAKE2b), and training events store only
+feature indices, never text. The durable event log therefore cannot be dictionary-reversed into the
+content of erased memories. Explanations are computed from the text being scored, and the "top risk
+features" report only names tokens from the built-in seed corpus.
 """
 from __future__ import annotations
 
 import math
 import re
-import zlib
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
+
+COMPONENT = "risk"
+Journal = Callable[[dict[str, Any]], Awaitable[None]]
 
 _TOKEN_RE = re.compile(r"[a-z0-9@._'-]+")
 DIM = 1 << 18
@@ -74,10 +81,6 @@ def tokens(text: str) -> list[str]:
     return words + [f"{a} {b}" for a, b in zip(words, words[1:])]
 
 
-def _idx(tok: str) -> int:
-    return zlib.crc32(tok.encode("utf-8")) % DIM
-
-
 @dataclass
 class RiskScore:
     probability: float
@@ -94,39 +97,50 @@ class OnlineRiskModel:
         base_threshold: float = 0.5,
         trust_slope: float = 0.4,
         seed: bool = True,
+        hash_key: bytes = b"",
+        journal: Journal | None = None,
     ) -> None:
         self.lr = learning_rate
         self.l2 = l2
         self.base_threshold = base_threshold
         self.trust_slope = trust_slope
+        self._hash_key = hash_key[:64]
+        self._journal = journal
         self.w: dict[int, float] = {}
         self.g2: dict[int, float] = {}
-        self.vocab: dict[int, str] = {}  # for explanations only
         self.bias = 0.0
         self.examples = 0
         # Reviewer outcomes on items this model held (drives threshold tuning).
         self.model_held_rejected = 0
         self.model_held_released = 0
         self.missed_attacks = 0  # reported after slipping past screening (recall signal)
-        self.updated_at: datetime | None = None
+        self.updated_at: str | None = None
+        self._seed_vocab: dict[int, str] = {}
+        for t in SEED_MALICIOUS + SEED_BENIGN:
+            for tok in tokens(t):
+                self._seed_vocab.setdefault(self._idx(tok), tok)
         if seed:
             for _ in range(8):
                 for t in SEED_MALICIOUS:
-                    self._step(t, 1)
+                    self._step(self.features(t), 1)
                 for t in SEED_BENIGN:
-                    self._step(t, 0)
-            self.examples = 0  # report only real feedback
+                    self._step(self.features(t), 0)
 
-    # ------------------------------------------------------------------
+    # -- features --------------------------------------------------------
+
+    def _idx(self, tok: str) -> int:
+        h = hashlib.blake2b(tok.encode("utf-8"), digest_size=8, key=self._hash_key)
+        return int.from_bytes(h.digest(), "big") % DIM
+
+    def features(self, text: str) -> list[int]:
+        return [self._idx(t) for t in tokens(text)]
+
+    # -- learning core ---------------------------------------------------
 
     def _logit(self, feats: list[int]) -> float:
         return self.bias + sum(self.w.get(i, 0.0) for i in feats) / math.sqrt(max(len(feats), 1))
 
-    def _step(self, text: str, label: int) -> None:
-        toks = tokens(text)
-        feats = [_idx(t) for t in toks]
-        for t, i in zip(toks, feats):
-            self.vocab.setdefault(i, t)
+    def _step(self, feats: list[int], label: int) -> None:
         z = max(-30.0, min(30.0, self._logit(feats)))
         err = label - 1.0 / (1.0 + math.exp(-z))
         norm = math.sqrt(max(len(feats), 1))
@@ -135,6 +149,57 @@ class OnlineRiskModel:
             self.g2[i] = self.g2.get(i, 0.0) + g * g
             self.w[i] = self.w.get(i, 0.0) - self.lr * g / math.sqrt(self.g2[i] + 1e-8)
         self.bias += self.lr * 0.1 * err
+
+    def apply(self, event: dict[str, Any]) -> None:
+        kind = event.get("type", "label")
+        if kind == "label":
+            # A few passes so one reviewer decision visibly moves the model.
+            for _ in range(3):
+                self._step(event["f"], int(event["y"]))
+            self.examples += 1
+            if event.get("held"):
+                if event["y"]:
+                    self.model_held_rejected += 1
+                else:
+                    self.model_held_released += 1
+            if event.get("missed"):
+                self.missed_attacks += 1
+        self.updated_at = event.get("at")
+
+    def to_state(self) -> dict[str, Any]:
+        return {
+            "params": {"lr": self.lr, "l2": self.l2, "base_threshold": self.base_threshold,
+                       "trust_slope": self.trust_slope},
+            "w": {str(k): v for k, v in self.w.items()},
+            "g2": {str(k): v for k, v in self.g2.items()},
+            "bias": self.bias,
+            "examples": self.examples,
+            "held_rejected": self.model_held_rejected,
+            "held_released": self.model_held_released,
+            "missed": self.missed_attacks,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_state(
+        cls, state: dict[str, Any] | None, hash_key: bytes = b"", journal: Journal | None = None,
+    ) -> "OnlineRiskModel":
+        if not state:
+            return cls(hash_key=hash_key, journal=journal)
+        p = state["params"]
+        m = cls(learning_rate=p["lr"], l2=p["l2"], base_threshold=p["base_threshold"],
+                trust_slope=p["trust_slope"], seed=False, hash_key=hash_key, journal=journal)
+        m.w = {int(k): v for k, v in state["w"].items()}
+        m.g2 = {int(k): v for k, v in state["g2"].items()}
+        m.bias = state["bias"]
+        m.examples = state["examples"]
+        m.model_held_rejected = state["held_rejected"]
+        m.model_held_released = state["held_released"]
+        m.missed_attacks = state["missed"]
+        m.updated_at = state["updated_at"]
+        return m
+
+    # -- public API ------------------------------------------------------
 
     def threshold(self, trust: float) -> float:
         held = self.model_held_rejected + self.model_held_released
@@ -147,7 +212,7 @@ class OnlineRiskModel:
 
     def score(self, text: str, trust: float) -> RiskScore:
         toks = tokens(text)
-        feats = [_idx(t) for t in toks]
+        feats = [self._idx(t) for t in toks]
         p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, self._logit(feats)))))
         thr = self.threshold(trust)
         contrib = sorted(
@@ -162,23 +227,24 @@ class OnlineRiskModel:
             top_features=[t for _, t in contrib[:5]],
         )
 
-    def learn(self, text: str, malicious: bool, held_by_model: bool = False) -> None:
-        # A few passes so one reviewer decision visibly moves the model.
-        for _ in range(3):
-            self._step(text, int(malicious))
-        self.examples += 1
-        if held_by_model:
-            if malicious:
-                self.model_held_rejected += 1
-            else:
-                self.model_held_released += 1
-        self.updated_at = datetime.now(timezone.utc)
+    async def learn(
+        self, text: str, malicious: bool, held_by_model: bool = False, missed: bool = False,
+    ) -> None:
+        event = {
+            "type": "label", "f": self.features(text), "y": int(malicious),
+            "held": held_by_model, "missed": missed,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        if self._journal is not None:
+            await self._journal(event)
+        else:
+            self.apply(event)
 
     def stats(self) -> dict[str, Any]:
         held = self.model_held_rejected + self.model_held_released
         strongest = sorted(
-            ((w, self.vocab.get(i, "?")) for i, w in self.w.items()
-             if self.vocab.get(i, "?") not in _STOP), reverse=True,
+            ((self.w.get(i, 0.0), t) for i, t in self._seed_vocab.items() if t not in _STOP),
+            reverse=True,
         )[:10]
         return {
             "feedback_examples": self.examples,
@@ -187,5 +253,5 @@ class OnlineRiskModel:
             "missed_attacks_reported": self.missed_attacks,
             "threshold_at_trust": {str(t): round(self.threshold(t), 4) for t in (0.3, 0.5, 0.9)},
             "top_risk_features": [t for _, t in strongest],
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_at": self.updated_at,
         }
