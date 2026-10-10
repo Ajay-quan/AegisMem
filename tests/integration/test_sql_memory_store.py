@@ -1,6 +1,9 @@
 """PostgresStore exercised through SQLAlchemy on SQLite: every field must round-trip."""
 from datetime import datetime, timedelta, timezone
 
+import os
+import uuid
+
 import pytest
 
 from adapters.relational_store.postgres_store import PostgresStore
@@ -9,9 +12,18 @@ from core.exceptions import MemoryNotFoundError
 from core.schemas.memory import MemoryItem, MemoryLayer
 
 
-@pytest.fixture
-async def db(tmp_path):
-    store = PostgresStore(f"sqlite+aiosqlite:///{tmp_path}/mem.db")
+PG_URL = os.environ.get("AEGIS_TEST_PG_URL")  # e.g. postgresql+asyncpg://... (set in CI)
+
+
+@pytest.fixture(params=["sqlite"] + (["postgres"] if PG_URL else []))
+async def db(request, tmp_path):
+    url = PG_URL if request.param == "postgres" else f"sqlite+aiosqlite:///{tmp_path}/mem.db"
+    store = PostgresStore(url)
+    if request.param == "postgres":  # shared server: start every test from an empty schema
+        from adapters.relational_store import control_models  # noqa: F401
+        from adapters.relational_store.models import Base
+        async with store._engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     await store.initialize()
     yield store
     await store.close()

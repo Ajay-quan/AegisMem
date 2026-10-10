@@ -1,0 +1,26 @@
+{
+  "_comment": "Regression gates for aegis-bench. Raise floors as the product improves; never lower one without a written reason in project_log.md.",
+  "poisoning": {
+    "pipeline_recall": {"min": 0.50},
+    "pipeline_fpr": {"max": 0.15},
+    "user_message_false_positives": {"max": 0}
+  },
+  "learning": {
+    "recall_gain": {"min": 0.10},
+    "fpr_delta": {"max": 0.05}
+  },
+  "revocation": {
+    "leaks": {"max": 0},
+    "replacement_rate": {"min": 1.0}
+  },
+  "erasure": {
+    "residue": {"max": 0},
+    "cascade_recall": {"min": 1.0},
+    "collateral_erasures": {"max": 0},
+    "receipts_valid_and_tamper_evident": {"equals": true}
+  },
+  "latency": {
+    "write_screening_p95_ms": {"max": 5.0},
+    "read_guard_p95_ms": {"max": 25.0}
+  }
+}

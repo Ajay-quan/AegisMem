@@ -115,6 +115,8 @@ class OnlineRiskModel:
         self.model_held_released = 0
         self.missed_attacks = 0  # reported after slipping past screening (recall signal)
         self.updated_at: str | None = None
+        self._anchor_malicious = [self.features(t) for t in SEED_MALICIOUS]
+        self._anchor_benign = [self.features(t) for t in SEED_BENIGN]
         self._seed_vocab: dict[int, str] = {}
         for t in SEED_MALICIOUS + SEED_BENIGN:
             for tok in tokens(t):
@@ -153,9 +155,17 @@ class OnlineRiskModel:
     def apply(self, event: dict[str, Any]) -> None:
         kind = event.get("type", "label")
         if kind == "label":
-            # A few passes so one reviewer decision visibly moves the model.
-            for _ in range(3):
-                self._step(event["f"], int(event["y"]))
+            y = int(event["y"])
+            # A few passes so one reviewer decision visibly moves the model, each paired
+            # with rehearsal of an anchor example of the opposite class (experience replay).
+            # Reviewer labels are heavily skewed toward attacks; without rehearsal, shared
+            # everyday words ("customers", "reply") drift toward risky and FPR climbs.
+            # The anchor is chosen deterministically from the event so replay stays exact.
+            anchors = self._anchor_benign if y else self._anchor_malicious
+            for k in range(3):
+                self._step(event["f"], y)
+                if anchors:
+                    self._step(anchors[(sum(event["f"]) + k) % len(anchors)], 1 - y)
             self.examples += 1
             if event.get("held"):
                 if event["y"]:
@@ -202,12 +212,21 @@ class OnlineRiskModel:
     # -- public API ------------------------------------------------------
 
     def threshold(self, trust: float) -> float:
+        """Trust-scaled threshold with cost-asymmetric self-tuning.
+
+        Reviewer time is the scarce resource, so the threshold rises readily when reviewers
+        keep releasing model holds, but falls only slightly, and only with evidence, when
+        holds are accurate. Recall should improve through content learning, not by holding
+        more borderline items. Precision is Beta(2,2)-smoothed so a few reviews can't swing it.
+        """
         held = self.model_held_rejected + self.model_held_released
         adjust = 0.0
         if held >= 5:
-            # Precision 0.5 -> no change; all released -> +0.2; all rejected -> -0.2.
-            precision = self.model_held_rejected / held
-            adjust = (0.5 - precision) * 0.4
+            precision = (self.model_held_rejected + 2) / (held + 4)
+            if precision < 0.5:
+                adjust = min(0.2, (0.5 - precision) * 0.5)
+            elif held >= 20:
+                adjust = -min(0.05, (precision - 0.5) * 0.1)
         return max(0.2, min(0.95, self.base_threshold + self.trust_slope * trust + adjust))
 
     def score(self, text: str, trust: float) -> RiskScore:

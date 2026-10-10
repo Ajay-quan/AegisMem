@@ -2,6 +2,9 @@
 import asyncio
 import json
 
+import os
+import uuid
+
 import pytest
 from sqlalchemy import select
 
@@ -13,9 +16,16 @@ from services.erasure_service import SqlReceiptStore
 from services.learning_runtime import LearningRuntime
 
 
-@pytest.fixture
-async def store(tmp_path):
-    s = ControlStore(f"sqlite+aiosqlite:///{tmp_path}/durable.db")
+PG_URL = os.environ.get("AEGIS_TEST_PG_URL")
+
+
+@pytest.fixture(params=["sqlite"] + (["postgres"] if PG_URL else []))
+async def store(request, tmp_path):
+    s = ControlStore(PG_URL if request.param == "postgres" else f"sqlite+aiosqlite:///{tmp_path}/durable.db")
+    if request.param == "postgres":
+        from adapters.relational_store.models import Base
+        async with s._engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     await s.create_schema()
     yield s
     await s.close()

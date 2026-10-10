@@ -32,18 +32,12 @@ dependencies = [
     # LLM providers
     "openai>=1.30.0",
     "anthropic>=0.28.0",
-    "tiktoken>=0.7.0",
-    # Embeddings
-    "sentence-transformers>=3.0.0",
     "numpy>=1.26.0",
     "scipy>=1.13.0",
     # Vector store
     "qdrant-client>=1.9.0",
     # Graph store
     "neo4j>=5.20.0",
-    # Agent integration
-    "langgraph>=0.1.0",
-    "langchain-core>=0.2.0",
     # Observability
     "opentelemetry-api>=1.24.0",
     "opentelemetry-sdk>=1.24.0",
@@ -58,6 +52,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local embedding models (pulls PyTorch; not needed with API embeddings or in CI).
+local-embeddings = ["sentence-transformers>=3.0.0"]
+# Agent-framework integrations.
+agents = ["langgraph>=0.1.0", "langchain-core>=0.2.0", "tiktoken>=0.7.0"]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.7",

@@ -41,6 +41,9 @@ EVENT_WEIGHTS: dict[str, tuple[float, float]] = {
     "used": (0.25, 0.0),
 }
 
+SOURCE_SPILLOVER = 0.1
+INHERIT_FLOOR = 0.8
+
 Journal = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -78,7 +81,10 @@ class TrustCalibrator:
     def _origin_stat(self, source: str, origin: str) -> BetaStat:
         stat = self._stats.get(_key(source, origin))
         if stat is None:
-            p = self._source_stat(source).mean
+            # A new origin inherits the channel's learned trust, floored at a fraction of the
+            # static prior: a channel cannot be condemned purely by its bad origins.
+            static = SOURCE_TRUST.get(source, DEFAULT_TRUST)
+            p = max(self._source_stat(source).mean, INHERIT_FLOOR * static)
             stat = BetaStat(alpha=p * self.k, beta=(1 - p) * self.k)
         return stat
 
@@ -87,9 +93,11 @@ class TrustCalibrator:
         da, db = EVENT_WEIGHTS[event["event"]]
         weight, at = float(event.get("weight", 1.0)), event.get("at")
 
-        # Source-level learns at half rate when an origin is known: one bad domain
-        # should not condemn every tool output.
-        src_w = weight * (0.5 if origin else 1.0)
+        # A source is a channel; origins are the actors. When an origin is known, the
+        # source moves at a small fraction of the rate, otherwise a handful of bad domains
+        # would lower trust (and the risk threshold) for every new origin on that channel.
+        # Measured by aegis-bench `learning`: 0.5 doubled held-out FPR, 0.1 does not.
+        src_w = weight * (SOURCE_SPILLOVER if origin else 1.0)
         src = self._source_stat(source)
         src.alpha += da * src_w
         src.beta += db * src_w

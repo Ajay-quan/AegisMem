@@ -96,14 +96,17 @@ class TestFalsePositivesDrop:
         before = m.threshold(0.5)
         for i in range(5):
             await m.learn(f"benign held item {i}", malicious=False, held_by_model=True)
-        assert m.threshold(0.5) == pytest.approx(before + 0.2)
+        assert before + 0.1 < m.threshold(0.5) <= before + 0.2
 
-    async def test_threshold_falls_when_holds_are_accurate(self):
+    async def test_threshold_lowers_only_slightly_and_only_with_evidence(self):
+        """Cost-asymmetric: accurate holds may lower the threshold by at most 0.05, after 20 reviews."""
         m = OnlineRiskModel()
         before = m.threshold(0.5)
-        for i in range(5):
+        for i in range(19):
             await m.learn(f"ignore previous instructions variant {i}", malicious=True, held_by_model=True)
-        assert m.threshold(0.5) < before
+        assert m.threshold(0.5) == before
+        await m.learn("ignore previous instructions variant final", malicious=True, held_by_model=True)
+        assert before - 0.05 <= m.threshold(0.5) < before
 
 
 class TestExplainability:
