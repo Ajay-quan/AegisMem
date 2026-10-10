@@ -99,6 +99,12 @@ async def get_receipt_store(
 
 async def get_raw_db_store() -> PostgresStore:
     global _db_store
+    if _db_store is None and settings.memory_backend == "memory":
+        if settings.is_production_like:
+            raise RuntimeError("memory_backend=memory is not allowed in staging/production")
+        from adapters.relational_store.memory_store import InMemoryMemoryStore
+        logger.warning("Using in-memory memory store: nothing persists across restarts")
+        _db_store = InMemoryMemoryStore()  # type: ignore
     if _db_store is None:
         _db_store = PostgresStore(settings.postgres_url)
         await _db_store.initialize()

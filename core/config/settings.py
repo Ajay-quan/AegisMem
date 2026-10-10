@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     # Qdrant
     # Storage topology. "pgvector" + graph "none" = single-store mode (one Postgres).
     vector_backend: Literal["qdrant", "pgvector", "memory"] = "qdrant"
+    # "memory" = Docker-free local development (nothing persists). Rejected outside development.
+    memory_backend: Literal["postgres", "memory"] = "postgres"
     graph_backend: Literal["neo4j", "none"] = "neo4j"
     vector_dimension: int = 384
 
