@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     outbox_worker_enabled: bool = True
     outbox_interval_seconds: float = 5.0
     outbox_max_attempts: int = 8
+    # Retention for operational records (pruned by the background maintenance loop).
+    ledger_retention_hours: int = 168
+    idempotency_retention_hours: int = 24
 
     # Auth. Disabled only in development; staging/production refuse to boot without it.
     auth_enabled: bool = False

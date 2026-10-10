@@ -56,7 +56,9 @@ async def lifespan(app: FastAPI):
                                   await get_raw_vector_store(), get_embedding(),
                                   max_attempts=settings.outbox_max_attempts)
             app.state.outbox_task = asyncio.create_task(
-                worker.run_forever(settings.outbox_interval_seconds))
+                worker.run_forever(settings.outbox_interval_seconds,
+                                   ledger_hours=settings.ledger_retention_hours,
+                                   idempotency_hours=settings.idempotency_retention_hours))
     except Exception as e:
         if settings.is_production_like:
             raise  # fail closed: never serve without durable stores

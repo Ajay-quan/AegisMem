@@ -114,6 +114,23 @@ class QdrantStore(VectorStore):
             points_selector=PointIdsList(points=[point_id]),
         )
 
+    async def backfill_tenant(self, tenant_id: str, batch: int = 256) -> int:
+        """Stamp tenant_id on points written before tenancy (they are invisible under tenant filters)."""
+        from qdrant_client.models import Filter, IsEmptyCondition, PayloadField
+        client = await self._get_client()
+        missing = Filter(must=[IsEmptyCondition(is_empty=PayloadField(key="tenant_id"))])
+        updated, offset = 0, None
+        while True:
+            points, offset = await client.scroll(self.collection_name, scroll_filter=missing,
+                                                 limit=batch, offset=offset, with_payload=False)
+            if not points:
+                return updated
+            await client.set_payload(self.collection_name, payload={"tenant_id": tenant_id},
+                                     points=[p.id for p in points])
+            updated += len(points)
+            if offset is None:
+                return updated
+
     async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
         client = await self._get_client()
         await client.set_payload(

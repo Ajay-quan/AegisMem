@@ -133,10 +133,23 @@ class OutboxWorker:
         else:
             raise ValueError(f"unknown outbox op {rec.op}")
 
-    async def run_forever(self, interval_s: float = 5.0) -> None:
+    async def maintenance(self, ledger_hours: int, idempotency_hours: int) -> dict[str, int]:
+        """Prune operational records so control-plane tables stay bounded."""
+        from datetime import timedelta
+        return {
+            "ledger_pruned": await self._control.prune_ledger(timedelta(hours=ledger_hours)),
+            "idempotency_pruned": await self._control.prune_idempotency(timedelta(hours=idempotency_hours)),
+        }
+
+    async def run_forever(self, interval_s: float = 5.0, maintenance_every: int = 720,
+                          ledger_hours: int = 168, idempotency_hours: int = 24) -> None:
+        ticks = 0
         while True:
             try:
                 await self.drain_once()
+                if ticks % maintenance_every == 0:  # ~hourly at the default 5s interval
+                    logger.info(f"maintenance: {await self.maintenance(ledger_hours, idempotency_hours)}")
+                ticks += 1
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # never let the loop die

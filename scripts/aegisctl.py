@@ -41,6 +41,9 @@ async def main(argv: list[str]) -> int:
     rb.add_argument("--component", required=True, choices=["trust", "risk"])
     sub.add_parser("drain-outbox", help="replay queued vector-index repairs once")
     sub.add_parser("outbox-status")
+    bf = sub.add_parser("backfill-tenant", help="stamp tenant_id on pre-tenancy Qdrant points")
+    bf.add_argument("--tenant", default="default")
+    sub.add_parser("prune", help="prune expired retrieval-ledger and idempotency records now")
     args = ap.parse_args(argv)
 
     store = await get_control_store()
@@ -57,6 +60,18 @@ async def main(argv: list[str]) -> int:
             ok = await store.revoke_api_key(args.tenant, args.key_id)
             print("revoked" if ok else "not found or already revoked")
             return 0 if ok else 1
+        elif args.cmd == "backfill-tenant":
+            from apps.api.dependencies import get_raw_vector_store
+            vs = await get_raw_vector_store()
+            if not hasattr(vs, "backfill_tenant"):
+                print("backfill only applies to Qdrant (pgvector rows already carry tenant_id)")
+                return 1
+            print(f"stamped tenant_id={args.tenant} on {await vs.backfill_tenant(args.tenant)} points")
+        elif args.cmd == "prune":
+            from datetime import timedelta
+            print({"ledger": await store.prune_ledger(timedelta(hours=settings.ledger_retention_hours)),
+                   "idempotency": await store.prune_idempotency(
+                       timedelta(hours=settings.idempotency_retention_hours))})
         elif args.cmd == "outbox-status":
             print(await store.outbox_counts() or "empty")
         elif args.cmd == "drain-outbox":
