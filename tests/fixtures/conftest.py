@@ -42,6 +42,10 @@ class MockPostgresStore:
         if memory_id in self._memories:
             self._memories[memory_id].status = "deleted"
 
+    async def purge_memory(self, memory_id: str, user_id: str) -> None:
+        self._memories.pop(memory_id, None)
+        self._logs.append({"memory_id": memory_id, "operation": "purge"})
+
     async def list_memories(self, user_id: str, namespace: str = "", memory_type: str = "",
                              status: str = "active", limit: int = 50, offset: int = 0) -> list:
         results = [

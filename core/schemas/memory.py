@@ -251,9 +251,13 @@ class RetrievalCandidate(BaseModel):
 class RetrievalResult(BaseModel):
     """Final retrieval result set."""
 
+    retrieval_id: str = Field(default_factory=new_id)
     query: RetrievalQuery
     candidates: list[RetrievalCandidate]
     total_found: int
+    guard_report: list[dict[str, Any]] = Field(
+        default_factory=list, description="Candidates withheld or replaced by the integrity guard",
+    )
     retrieved_at: datetime = Field(default_factory=utcnow)
     latency_ms: float = 0.0
 

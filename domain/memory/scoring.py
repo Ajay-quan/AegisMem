@@ -142,6 +142,7 @@ def score_memory_for_retrieval(
     memory: MemoryItem,
     semantic_score: float,
     query_text: str = "",
+    weights: dict[str, float] | None = None,
 ) -> RetrievalCandidate:
     """Compute all signals and return a fully-scored RetrievalCandidate.
 
@@ -153,7 +154,12 @@ def score_memory_for_retrieval(
         Dense similarity returned by the vector store.
     query_text : str
         The original query string — needed for lexical scoring.
+    weights : dict | None
+        Per-user learned weights; falls back to settings defaults.
     """
+    # Cosine similarity can be negative; clamp so weakly related memories are
+    # scored low instead of failing validation and silently vanishing.
+    semantic_score = max(0.0, min(1.0, semantic_score))
     recency = compute_recency_score(memory)
     importance = memory.importance_score
 
@@ -170,6 +176,7 @@ def score_memory_for_retrieval(
         importance_score=importance,
         access_count=memory.access_count,
         contradiction_penalty=contradiction_penalty,
+        weights=weights,
     )
 
     # Apply memory-type boost.

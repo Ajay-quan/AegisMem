@@ -1,0 +1,182 @@
+# AegisMem Project Log
+
+Handover log for humans and AI agents. Read this first, then `ROADMAP.md`. Append new entries at the
+bottom, newest last. Each entry should cover what was done, why, where in the code, and what is still open.
+
+## Orientation (keep current)
+
+- **What it is:** a governed memory service for LLM agents. FastAPI app with typed memories, hybrid retrieval,
+  LLM-judged updates and contradiction checks, reflections, and an eval harness.
+- **Strategic bet (since Session 2):** the *integrity layer for agent memory*: provenance and trust, quarantine, a read-time
+  guard against revoked or superseded data, and verifiable cascading erasure with signed receipts. Handoff and continual learning sit
+  on top. It does not compete with Mem0 or Zep on recall (see `ROADMAP.md`).
+- **Layout:** `core/` (schemas, config), `domain/` (pure logic: scoring, reranker, learning, evaluator),
+  `services/` (orchestration), `adapters/` (LLM, embeddings, Postgres/Qdrant/Neo4j), `apps/api` (FastAPI routes and DI).
+- **Run tests:** `.venv/bin/python -m pytest -q` from `aegismem/`. Mock backends are used and no services are needed.
+- **Repo:** git root is `aegismem/` (remote `github.com/Ajay-quan/AegisMem`). The parent folder holds PDFs, screenshots and a tarball, which are not code.
+- **Conventions:** async services; stores are injected; tests use `tests/fixtures/conftest.py::MockPostgresStore`;
+  scoring weights come from `core/config/settings.py`.
+
+## Log
+
+### 2026-10-10 · Session 1: Review, roadmap, Phase 1 features
+
+**Interaction:** The user asked for a repo review and a merit assessment. Then they asked for a startup-grade plan
+focused on novelty, easier context handoff, small real problems a basic user hits, and continual learning,
+plus this log file.
+
+**Assessment:** The architecture is solid, but the feature set overlaps Mem0, Zep and Letta. Differentiation must come
+from handoff, truth maintenance and learning, proven with benchmarks. Baseline: 58 tests passing.
+
+**Built:**
+1. `ROADMAP.md`: positioning, a table of 10 "unnoticed problems" mapped to features, a 3-layer continual-learning
+   strategy (retrieval weights, then memory utility priors, then procedural learning; model weights stay frozen), and phases P1 to P3.
+2. **Handoff packets**: `services/handoff_service.py`, `POST /api/v1/handoff`.
+   - Priority-ordered sections: open_questions, recent_changes (shows the previous value through
+     `parent_memory_ids[0]`), profile (semantic layer or fact/procedure/reflection/summary), task_relevant (hybrid
+     retrieval), recent_activity.
+   - Token budget (estimated at about 4 chars per token), dedupe across sections, per-section cap, `omitted` counts, `since` filter,
+     and markdown output with `[memory_id[:8]]` citations. Deterministic, with no LLM calls.
+3. **Continual learning v1**:
+   - `domain/learning/weight_learner.py`: `OnlineWeightLearner` is per-user online logistic SGD over the signals
+     (semantic, recency, importance, access). Guardrails: `min_events=20` before it is served, L2 pull toward the defaults,
+     a floor of 0.05 and renormalisation to sum to 1, plus a per-user reset.
+   - `services/feedback_service.py`: `RetrievalLedger` is an LRU of the signals scored for each `retrieval_id`.
+     `FeedbackService.submit` validates the user, memory ids and one-time use; updates
+     `retrieval_count` and `successful_retrieval_count`; and trains the learner.
+   - `RetrievalResult.retrieval_id` was added (`core/schemas/memory.py`). `RetrievalService` now takes optional
+     `learner` and `ledger` and scores with learned weights when they are active (`score_memory_for_retrieval(weights=...)`).
+   - Endpoints: `POST /api/v1/feedback`, `GET` and `DELETE /api/v1/learning/{user_id}`. `/retrieve` now returns `retrieval_id`.
+   - DI: module-level `_learner` and `_ledger` singletons in `apps/api/dependencies.py`.
+4. Tests: `tests/unit/test_learning.py`, `tests/unit/test_handoff.py`, `tests/api/test_handoff_feedback_api.py`.
+   Total is 69 passing.
+
+**Known gaps and next steps (priority order):**
+- Learner state and the ledger are **process-local**. They are lost on restart and not shared across workers. Next step: a Postgres
+  table for feedback events and user weights (an Alembic migration), plus a `LearningStore` protocol implementation.
+- Build an offline replay evaluator: replay logged feedback and compare MRR and recall@k for learned vs. default weights. This gates turning learning on by default.
+- Handoff scans up to 500 active memories per call, which is fine for now. It needs indexed queries (by status or contradiction, and by `updated_at`) at scale.
+- `access` signal normalisation is duplicated in `scoring.compute_composite_score` and `RetrievalLedger.record`. Extract a shared helper.
+- Repo hygiene: there is no `.gitignore`. `__pycache__`, `.DS_Store` and `.env` are tracked. The current `.env` has only placeholder or local values,
+  but it should still be untracked. This has not been changed yet and needs the owner's approval.
+- After that: the P2 items in `ROADMAP.md` (score explanations, validity windows, memory inbox, PII, SDK).
+
+### 2026-10-10 · Session 2: Pivot to "integrity layer for agent memory"
+
+**Interaction:** The user does not want a Mem0 lookalike and asked for internet research into the space to find a new niche, and
+then to start building. "Top 1000" was not literally feasible. I ran targeted searches over the vendor landscape (Mem0, Zep, Letta,
+Cognee, Supermemory, LangMem, SurrealDB), 2026 arXiv work on memory security, governance and erasure, and multi-agent handoff.
+
+**Findings → decision:** Recall is commoditised. Unsolved in products: memory poisoning and provenance laundering, revoked facts
+still being served, and unverifiable deletion (GDPR). Only fragments exist (SurrealDB enterprise forget, the Attestari OSS package,
+the SuperLocalMemory paper). **New positioning: the trust and compliance layer for agent memory.** See `ROADMAP.md`, which was rewritten.
+
+**Bugs found in AegisMem itself (all fixed):**
+1. *Revoked-but-authoritative:* superseded memories kept `status=active` in the vector payload and were served. A repro returned
+   only the old address. The fix is the read-time guard plus a status sync on supersede (`VectorStore.update_payload`).
+2. *Silent result loss:* negative cosine similarity failed the `semantic_score>=0` validation, and the candidate was swallowed. Now clamped
+   in `score_memory_for_retrieval`.
+3. *Qdrant ids from `hash()`:* these are salted per process, so ids changed on restart and deletes missed. Now `uuid5` (`_point_id`).
+   **Existing Qdrant collections need re-indexing.**
+4. *Delete was soft:* content and vectors were retained. A new `purge_memory` hard-deletes the row and its contradiction rows.
+
+**Built:**
+- `domain/integrity/provenance.py`: trust by source, non-amplification (`derived_trust`), and injection heuristics with a quarantine rule
+  (trust < 0.7 and instruction-like). Stored in `metadata["provenance"]` and `metadata["quarantine"]`.
+- `services/ingest_service.py::_provenance`: attaches provenance; callers may lower trust but never raise it; quarantined memories get `status=pending`.
+- `services/guard_service.py::MemoryGuard`: canonical re-check of every candidate. It serves, replaces with a successor (via `superseded_by` /
+  `merged_into` pointers or the `parent_memory_ids` index), or withholds (erased, owner mismatch, quarantined, expired, trust floor).
+  It is always on in `RetrievalService`. `RetrievalResult.guard_report` and the `/retrieve` response explain what was withheld.
+- `services/erasure_service.py`: `forget` computes the closure (requested, prior_version, derived, duplicate with cosine ≥ 0.95), purges from
+  the relational, vector and graph stores, re-verifies each store, and issues an HMAC-signed receipt with keyed-HMAC fingerprints (no content).
+- Contradiction temporal supersede now records `superseded_by`. Graph store has `delete_memory_node` and `has_memory_node`.
+- API: `POST /forget`, `GET /receipts/{id}`, `POST /receipts/verify`, `GET /quarantine/{user_id}`, `POST /quarantine/{id}/release?user_id=`.
+- Tests: `tests/unit/test_integrity.py`, `tests/api/test_integrity_api.py`. Total is **83 passing**.
+
+**Open / next (priority):** persist receipts, quarantine, learner and ledger (all currently in-process); build `scripts/integrity_audit.py`
+(the backend-agnostic audit is the go-to-market wedge); add signed handoff packets with per-item provenance; Ed25519 receipts; a pgvector-only mode.
+Known limits:
+- The injection detector is regex-based (precision and recall are unmeasured), so an eval set is needed.
+- `PostgresStore.update_memory` does not persist `parent_memory_ids` or `valid_to` changes.
+- Erasure doesn't cover backups (stated in the receipt) or the `facts` / `reflections` tables.
+- The successor index scans up to 1000 active memories.
+
+### 2026-10-10 · Session 3: Continual learning from outcomes (calibrated trust)
+
+**Interaction:** The user asked for a "very VERY useful" continual-learning integration and to start immediately.
+
+**Decision:** The most valuable signal is the human decisions the product already collects (quarantine approve/reject,
+corrections, confirmations, usage). The system learns *which sources and origins to believe*. That compounds with the integrity niche:
+fewer items need review over time, poisoned origins get shut out deployment-wide, and the effect is retroactive.
+
+**Built:**
+- `domain/learning/trust_calibrator.py`: `TrustCalibrator` keeps a Beta posterior per `source` and per `source|origin`. Origins
+  shrink toward their source (a new origin starts at the source's *learned* trust). The source learns at half rate when an origin is known.
+  Event weights are in `EVENT_WEIGHTS` (reject β+4, release α+2, corrected β+2, confirmed α+1, used α+0.25). Prior strength k=10,
+  with source priors from `SOURCE_TRUST`. `InMemoryTrustStore` is process-local.
+- Ingest (`IngestionService(trust_calibrator=...)`): trust is the calibrated value for `(source, origin)`. `origin` comes from
+  `metadata.origin` or `metadata.provenance.origin`, is stored in `metadata.provenance.origin`, and stays capped by the caller-supplied trust.
+- Guard (`MemoryGuard(trust_calibrator=...)`): `effective_trust = min(stored, live learned)`, so learned distrust is retroactive.
+  The default floor is `settings.guard_min_trust = 0.2`. `servable` is now **async**.
+- `services/outcome_service.py`: `OutcomeService.correct(kind=wrong|outdated, corrected_text)` supersedes the memory, links
+  `superseded_by` to the replacement, penalises the origin only for `wrong`, and flags transitively derived memories
+  (`contradiction_status=suspected`, confidence halved). It also has `confirm`, `release` (now used by the existing release endpoint) and
+  `reject` (penalise plus erase with a receipt).
+- `FeedbackService` records `used` for the origin of each used memory.
+- API: `POST /corrections`, `POST /memories/{id}/confirm?user_id=`, `POST /quarantine/{id}/reject?user_id=`,
+  `GET /trust/sources` (least-trusted first). DI: the `_calibrator` singleton is injected via `Depends(get_calibrator)`
+  into the ingest, retrieve (guard), feedback and outcome services, so tests can override it.
+- Tests: `tests/unit/test_trust_learning.py` (retroactive distrust, origin isolation, release builds trust, wrong vs outdated,
+  blast radius, cross-user protection) and an API test in `tests/api/test_integrity_api.py`. Total is **92 passing**.
+
+**Known limits / next:**
+- Calibrator state is in-process and should be persisted with the other learning state.
+- Trust is per deployment. Per-tenant scoping is needed for multi-tenant SaaS (key prefix by tenant).
+- Event weights are hand-set. Fit them from reviewer data once it exists.
+- `used` events could be gamed by a compromised agent. Consider capping the positive mass from `used` per origin per day.
+- Add a time decay so origins can recover, and an audit trail of trust changes (who or what moved it).
+
+### 2026-10-10 · Session 4: Self-improving write-risk model (continual learning #2)
+
+**Interaction:** The user set a standing persona (world-class AI-startup PM plus top engineer) and repeated the request for a very useful
+continual-learning integration. Saved as a memory preference.
+
+**Product rationale:** Calibrated trust (Session 3) learns *who* to believe. Screening *what* gets held was still a fixed regex,
+and reviewer workload (false positives) and missed attacks (false negatives) are the core cost and liability of a HITL product.
+So reviewer decisions now train the screener.
+
+**Built:**
+- `domain/learning/risk_model.py`: `OnlineRiskModel` uses crc32-hashed word unigrams and bigrams (2^18 dims), AdaGrad logistic regression
+  with L2, and a seed corpus (`SEED_MALICIOUS`/`SEED_BENIGN`) for cold start. `threshold(trust) = 0.5 + 0.4·trust + precision_adjust`,
+  where precision_adjust = (0.5 − precision of model-held items) × 0.4 after 5 or more reviewed holds, clamped to [0.2, 0.95]. `score()` returns
+  the probability, threshold, flag and top positive features (stopwords excluded) for explanations. `stats()` backs `GET /api/v1/risk-model`.
+- Ingest: rule check first (`trigger: "rule"`), then the model (`trigger: "model"`, reason plus `features`). `metadata.risk = {p, threshold}`
+  is stored on every write.
+- `OutcomeService`: release and confirm train benign, reject trains malicious (before erasure). The new correction kind **`malicious`**
+  covers an attack that slipped through: it penalises the origin like a rejection, trains the model, increments `missed_attacks`, and erases the memory
+  plus duplicates and derivatives with a receipt. This is the only path by which recall improves.
+- DI: the `_risk_model` singleton is injected via `Depends(get_risk_model)` into the ingest and outcome services.
+- Route note: the stats endpoint is `/risk-model`, not `/learning/risk-model`, because `/learning/{user_id}` would capture that path.
+- Tests: `tests/unit/test_risk_model.py` covers cold start, recall gained from missed-attack reports (a new variant from an unseen
+  origin gets held), false positives dropping after releases, threshold self-tuning both ways, explainability and determinism. Total is **102 passing**.
+
+**Observations / limits:**
+- At cold start, "Our refund policy changed: refunds are never allowed" (tool output) is held at p = 0.76. That may be a false positive
+  for support bots. The release loop corrects it per deployment, but the seed corpus needs real-world tuning and a held-out eval set.
+- The model is per deployment, in-process and unpersisted, like the other learning state. **Persisting all learning state is now the #1 P1 gap.**
+- Reviewer-poisoning risk: a malicious reviewer could release attacks to train them in. Add an audit trail and per-reviewer weighting later.
+- Bag-of-n-grams is easy to evade with paraphrases. A small embedding-based head (using the existing embedding backend) is the upgrade path.
+
+### 2026-10-10 · Session 5: 12-month product plan
+
+**Interaction:** The user wants production-grade solutions, not demos or small-scale ones, and asked for a full one-year plan for incrementally
+expanding scope and usefulness.
+
+**Output:** `PRODUCT_PLAN_12M.md` (Nov 2026 – Oct 2027). It covers the thesis, ICP and personas, principles, quarterly epics with exit criteria,
+the continual-learning plan with safety gates, KPIs and the north star, GTM and pricing hypotheses, the team plan, risks, and a 30-day sprint. Scope path:
+memory integrity → gateway for any memory store → compliance-grade governance (crypto-erasure, DSAR, SOC 2) → context integrity platform plus a
+cross-tenant threat network (the moat).
+
+**Implication for engineering:** the next work is Q1 "production core" and starts with durable, tenant-scoped, event-sourced learning
+state (remove the in-process singletons in `apps/api/dependencies.py`), auth, pgvector mode, the outbox sync and `aegis-bench`. No new
+features until that lands. An open decision for the founders is hosted-first vs self-host-first (recommendation: hosted, with a VPC option).

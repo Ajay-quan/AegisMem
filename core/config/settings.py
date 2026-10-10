@@ -87,6 +87,9 @@ class Settings(BaseSettings):
 
     # Penalties
     contradiction_penalty_weight: float = 0.40
+
+    # Integrity guard: memories whose (learned) trust falls below this are not served.
+    guard_min_trust: float = 0.2
     contradiction_confidence_threshold: float = 0.7
 
     # Recency decay

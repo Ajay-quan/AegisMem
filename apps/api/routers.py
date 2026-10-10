@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from apps.api.dependencies import (
     get_ingest_service, get_retrieve_service, get_update_service,
     get_reflect_service, get_contradiction_service, get_db_store,
+    get_feedback_service, get_handoff_service, get_learner,
+    get_erasure_service, get_vector_store, get_outcome_service, get_calibrator,
+    get_risk_model,
 )
 from apps.api.schemas import (
     IngestRequest, IngestResponse, BatchIngestRequest, BatchIngestResponse,
@@ -17,7 +20,17 @@ from apps.api.schemas import (
     UpdateRequest, UpdateResponse,
     ReflectRequest, ReflectResponse,
     ContradictionScanRequest, ContradictionScanResponse, ContradictionListResponse,
+    HandoffRequest, FeedbackRequest, FeedbackResponse, LearningStateResponse,
+    ForgetRequest, ErasureReceipt, ReceiptVerifyResponse,
+    QuarantineItem, QuarantineListResponse,
+    CorrectionRequest, CorrectionResponse, TrustSourcesResponse,
 )
+from core.config.settings import settings
+from services.outcome_service import OutcomeError
+from services.erasure_service import ErasureError
+from services.feedback_service import FeedbackError
+from services.handoff_service import HandoffPacket
+from domain.learning.weight_learner import default_weights
 from core.schemas.memory import Observation, SourceType, RetrievalQuery
 from core.exceptions import MemoryNotFoundError
 
@@ -144,11 +157,13 @@ async def retrieve_memories(
     context = "\n".join([f"[{s.rank}] {s.content}" for s in snippets]) if snippets else ""
 
     return RetrieveResponse(
+        retrieval_id=result.retrieval_id,
         query=request.query,
         results=snippets,
         total_found=result.total_found,
         latency_ms=result.latency_ms,
         context_window=context,
+        guard_report=result.guard_report,
     )
 
 
@@ -321,3 +336,183 @@ async def list_contradictions(resolved: bool = False, db=Depends(get_db_store)):
     """List all detected contradictions."""
     contradictions = await db.list_contradictions(resolved=resolved)
     return ContradictionListResponse(contradictions=contradictions, total=len(contradictions))
+
+
+# ---------------------------------------------------------------------------
+# Handoff
+# ---------------------------------------------------------------------------
+
+
+@router.post("/handoff", response_model=HandoffPacket)
+async def build_handoff(request: HandoffRequest, svc=Depends(get_handoff_service)):
+    """Build a token-budgeted, cited context packet for a new agent, model or session."""
+    return await svc.build(
+        user_id=request.user_id,
+        namespace=request.namespace,
+        task=request.task,
+        since=request.since,
+        token_budget=request.token_budget,
+        max_per_section=request.max_per_section,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feedback / continual learning
+# ---------------------------------------------------------------------------
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackRequest, svc=Depends(get_feedback_service)):
+    """Report which memories from a retrieval were used. Trains per-user ranking weights."""
+    try:
+        return await svc.submit(
+            retrieval_id=request.retrieval_id,
+            user_id=request.user_id,
+            used_memory_ids=request.used_memory_ids,
+        )
+    except FeedbackError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/learning/{user_id}", response_model=LearningStateResponse)
+async def get_learning_state(user_id: str, learner=Depends(get_learner)):
+    """Inspect what the system has learned about ranking for this user."""
+    state = await learner.state(user_id)
+    defaults = default_weights()
+    if state is None:
+        return LearningStateResponse(
+            user_id=user_id, learning_active=False, events=0, positives=0,
+            weights=defaults, default_weights=defaults,
+        )
+    return LearningStateResponse(
+        user_id=user_id,
+        learning_active=state.events >= learner.min_events,
+        events=state.events,
+        positives=state.positives,
+        weights={k: round(v, 4) for k, v in state.weights.items()},
+        default_weights=defaults,
+    )
+
+
+@router.delete("/learning/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_learning_state(user_id: str, learner=Depends(get_learner)):
+    """Discard learned ranking weights for this user (reverts to defaults)."""
+    await learner.reset(user_id)
+
+
+# ---------------------------------------------------------------------------
+# Integrity: verifiable erasure
+# ---------------------------------------------------------------------------
+
+
+@router.post("/forget", response_model=ErasureReceipt, tags=["integrity"])
+async def forget(request: ForgetRequest, svc=Depends(get_erasure_service)):
+    """Erase memories plus prior versions, derived memories and duplicates; return a signed receipt."""
+    try:
+        return await svc.forget(
+            user_id=request.user_id,
+            memory_ids=request.memory_ids,
+            all_for_user=request.all_for_user,
+            include_duplicates=request.include_duplicates,
+            reason=request.reason,
+        )
+    except ErasureError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/receipts/{receipt_id}", response_model=ErasureReceipt, tags=["integrity"])
+async def get_receipt(receipt_id: str, svc=Depends(get_erasure_service)):
+    receipt = await svc.get_receipt(receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="receipt not found")
+    return receipt
+
+
+@router.post("/receipts/verify", response_model=ReceiptVerifyResponse, tags=["integrity"])
+async def verify_receipt(receipt: ErasureReceipt, svc=Depends(get_erasure_service)):
+    """Check that a receipt was issued by this deployment and has not been altered."""
+    return ReceiptVerifyResponse(valid=svc.verify_receipt(receipt.model_dump()))
+
+
+# ---------------------------------------------------------------------------
+# Integrity: quarantine review
+# ---------------------------------------------------------------------------
+
+
+@router.get("/quarantine/{user_id}", response_model=QuarantineListResponse, tags=["integrity"])
+async def list_quarantine(user_id: str, db=Depends(get_db_store)):
+    """Memories held back at ingest (low-trust, instruction-like). Never served until released."""
+    held = await db.list_memories(user_id=user_id, status="pending", limit=200)
+    items = [
+        QuarantineItem(
+            memory_id=m.memory_id,
+            content=m.content,
+            reason=(m.metadata.get("quarantine") or {}).get("reason", ""),
+            trust=float((m.metadata.get("provenance") or {}).get("trust", 0.0)),
+            source=str((m.metadata.get("provenance") or {}).get("source", "")),
+            created_at=m.created_at,
+        )
+        for m in held
+    ]
+    return QuarantineListResponse(items=items, total=len(items))
+
+
+@router.post("/quarantine/{memory_id}/release", tags=["integrity"])
+async def release_quarantine(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """Approve held content after review. It becomes retrievable, and its origin earns trust."""
+    try:
+        return await svc.release(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/quarantine/{memory_id}/reject", tags=["integrity"])
+async def reject_quarantine(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """Reject held content. Its origin loses trust deployment-wide, and the content is erased with a receipt."""
+    try:
+        return await svc.reject(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Continual learning from outcomes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/corrections", response_model=CorrectionResponse, tags=["learning"])
+async def submit_correction(request: CorrectionRequest, svc=Depends(get_outcome_service)):
+    """Correct a memory. ``wrong`` teaches distrust of its origin; ``outdated`` does not.
+    Memories derived from it are flagged as suspect and returned."""
+    try:
+        return await svc.correct(
+            user_id=request.user_id,
+            memory_id=request.memory_id,
+            kind=request.kind,
+            corrected_text=request.corrected_text,
+            note=request.note,
+        )
+    except OutcomeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/memories/{memory_id}/confirm", tags=["learning"])
+async def confirm_memory(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """User or reviewer confirms a memory is correct; its origin earns trust."""
+    try:
+        return await svc.confirm(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/trust/sources", response_model=TrustSourcesResponse, tags=["learning"])
+async def trust_sources(calibrator=Depends(get_calibrator)):
+    """Learned reliability of every source/origin, least trusted first."""
+    rows = await calibrator.snapshot()
+    return TrustSourcesResponse(sources=rows, guard_min_trust=settings.guard_min_trust)
+
+
+@router.get("/risk-model", tags=["learning"])
+async def risk_model_stats(model=Depends(get_risk_model)):
+    """How the write-risk model has adapted: reviewed holds, precision, live thresholds, top risk signals."""
+    return model.stats()

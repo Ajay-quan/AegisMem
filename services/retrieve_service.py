@@ -33,11 +33,21 @@ class RetrievalService:
         vector_store: Any,
         embedding_backend: Any,
         graph_store: Any | None = None,
+        learner: Any | None = None,
+        ledger: Any | None = None,
+        guard: Any | None = None,
     ) -> None:
         self._db = relational_store
         self._vs = vector_store
         self._embed = embedding_backend
         self._graph = graph_store
+        self._learner = learner
+        self._ledger = ledger
+        # Integrity guard is always on; pass a configured one to change the trust floor.
+        if guard is None:
+            from services.guard_service import MemoryGuard
+            guard = MemoryGuard(relational_store)
+        self._guard = guard
         self._reranker = HeuristicReranker(
             diversity_threshold=settings.diversity_threshold,
         )
@@ -49,9 +59,14 @@ class RetrievalService:
         # Stage 1: Broad semantic retrieval (over-retrieve).
         semantic_candidates = await self._semantic_search(query)
 
-        # Stage 2: Enrich with full records + multi-signal scoring.
+        # Stage 2: Enrich with full records + multi-signal scoring,
+        # using per-user learned weights once enough feedback exists.
+        weights = None
+        if self._learner is not None:
+            weights = await self._learner.weights_for(query.user_id)
+        guard_report: list[dict[str, Any]] = []
         enriched = await self._enrich_candidates(
-            semantic_candidates, query,
+            semantic_candidates, query, weights=weights, guard_report=guard_report,
         )
 
         # Stage 3: Symbolic filters (time range, type, importance).
@@ -79,12 +94,16 @@ class RetrievalService:
             f"in {latency_ms:.1f}ms (candidates={len(enriched)})"
         )
 
-        return RetrievalResult(
+        result = RetrievalResult(
             query=query,
             candidates=reranked,
             total_found=len(filtered),
+            guard_report=guard_report,
             latency_ms=latency_ms,
         )
+        if self._ledger is not None:
+            self._ledger.record(result)
+        return result
 
     async def _semantic_search(
         self, query: RetrievalQuery,
@@ -118,31 +137,43 @@ class RetrievalService:
         self,
         semantic_hits: list[tuple[str, float]],
         query: RetrievalQuery,
+        weights: dict[str, float] | None = None,
+        guard_report: list[dict[str, Any]] | None = None,
     ) -> list[RetrievalCandidate]:
-        """Load full memory records from DB, compute multi-signal scores."""
-        candidates = []
+        """Resolve hits through the integrity guard, then compute multi-signal scores."""
+        report = guard_report if guard_report is not None else []
+        cache: dict[str, Any] = {}
+        candidates: list[RetrievalCandidate] = []
+        seen: set[str] = set()
         for memory_id, semantic_score in semantic_hits:
             try:
-                memory = await self._db.get_memory(memory_id)
-                candidate = score_memory_for_retrieval(
+                memory, decision = await self._guard.resolve(memory_id, query.user_id, cache)
+                if decision.action != "serve":
+                    report.append(decision.to_dict())
+                if memory is None or memory.memory_id in seen:
+                    continue
+                seen.add(memory.memory_id)
+                candidates.append(score_memory_for_retrieval(
                     memory, semantic_score, query_text=query.query_text,
-                )
-                candidates.append(candidate)
+                    weights=weights,
+                ))
             except Exception as e:
                 logger.debug(f"Could not enrich memory {memory_id}: {e}")
 
         # Fallback: if semantic search returned nothing, query DB directly.
-        if not candidates:
+        if not candidates and not report:
             memories = await self._db.list_memories(
                 user_id=query.user_id,
                 namespace=query.namespace,
                 limit=query.top_k * 2,
             )
             for memory in memories:
-                candidate = score_memory_for_retrieval(
-                    memory, 0.5, query_text=query.query_text,
-                )
-                candidates.append(candidate)
+                ok, _ = await self._guard.servable(memory)
+                if not ok:
+                    continue
+                candidates.append(score_memory_for_retrieval(
+                    memory, 0.5, query_text=query.query_text, weights=weights,
+                ))
 
         return candidates
 

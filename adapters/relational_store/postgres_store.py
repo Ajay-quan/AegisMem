@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy import select, update, and_, func
+from sqlalchemy import select, update, and_, func, delete, or_
 
 from core.exceptions import MemoryNotFoundError, MemoryStorageError
 from core.schemas.memory import MemoryItem, MemoryStatus, FactRecord as SchemaFact
@@ -118,6 +118,20 @@ class PostgresStore:
                 record.status = "deleted"
                 record.updated_at = utcnow()
                 await self._log_operation(sess, memory_id, user_id, "delete", {})
+
+    async def purge_memory(self, memory_id: str, user_id: str) -> None:
+        """Hard delete: removes the row and any contradiction text that may quote it.
+
+        Unlike ``delete_memory`` (a soft status flag), nothing recoverable remains.
+        The operation log keeps a content-free ``purge`` entry for accountability.
+        """
+        async with self.session() as sess:
+            await sess.execute(delete(MemoryRecord).where(MemoryRecord.memory_id == memory_id))
+            await sess.execute(delete(ContradictionRecord).where(or_(
+                ContradictionRecord.memory_a_id == memory_id,
+                ContradictionRecord.memory_b_id == memory_id,
+            )))
+            await self._log_operation(sess, memory_id, user_id, "purge", {})
 
     async def list_memories(
         self,

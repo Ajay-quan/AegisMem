@@ -8,6 +8,9 @@ from typing import Any
 from core.schemas.memory import (
     MemoryItem, MemoryType, MemoryLayer, SourceType, Observation, MemoryStatus,
 )
+from domain.integrity.provenance import (
+    base_trust, derived_from, derived_trust, get_trust, should_quarantine,
+)
 from domain.memory.scoring import compute_importance_heuristic
 
 logger = logging.getLogger(__name__)
@@ -27,12 +30,16 @@ class IngestionService:
         embedding_backend: Any,
         graph_store: Any | None = None,
         llm_client: Any | None = None,
+        trust_calibrator: Any | None = None,
+        risk_model: Any | None = None,
     ) -> None:
         self._db = relational_store
         self._vs = vector_store
         self._embed = embedding_backend
         self._graph = graph_store
         self._llm = llm_client
+        self._calibrator = trust_calibrator
+        self._risk = risk_model
 
     async def ingest_observation(
         self,
@@ -42,6 +49,7 @@ class IngestionService:
     ) -> MemoryItem:
         """Convert an observation into a stored memory."""
         importance = importance_override or compute_importance_heuristic(observation.content)
+        metadata, status = await self._provenance(observation)
 
         memory = MemoryItem(
             namespace=f"user:{observation.user_id}",
@@ -54,7 +62,8 @@ class IngestionService:
             source_ref=observation.session_id,
             event_time=observation.observed_at,
             importance_score=importance,
-            metadata=observation.metadata,
+            metadata=metadata,
+            status=status,
         )
 
         # Save to relational store
@@ -74,7 +83,7 @@ class IngestionService:
                     "memory_layer": memory.memory_layer,
                     "content": memory.content[:500],
                     "importance_score": memory.importance_score,
-                    "status": "active",
+                    "status": status.value,
                 },
             )
         except Exception as e:
@@ -99,6 +108,59 @@ class IngestionService:
             f"(type={memory.memory_type}, importance={importance:.2f})"
         )
         return memory
+
+    async def _provenance(self, observation: Observation) -> tuple[dict[str, Any], MemoryStatus]:
+        """Attach provenance + trust; quarantine low-trust instruction-like content."""
+        metadata = dict(observation.metadata)
+        prov = dict(metadata.get("provenance") or {})
+        source = observation.source_type.value if hasattr(observation.source_type, "value") \
+            else str(observation.source_type)
+        origin = str(prov.get("origin") or metadata.get("origin") or "")
+        if self._calibrator is not None:
+            trust = await self._calibrator.trust(source, origin)  # learned from outcomes
+        else:
+            trust = base_trust(observation.source_type)
+        if "trust" in prov:  # callers may lower trust, never raise it above the source default
+            trust = min(trust, float(prov["trust"]))
+
+        upstream = derived_from(metadata)
+        source_trusts = []
+        for mid in upstream:
+            try:
+                source_trusts.append(get_trust((await self._db.get_memory(mid)).metadata))
+            except Exception:
+                source_trusts.append(0.0)  # unknown source: assume untrusted
+        trust = derived_trust(trust, source_trusts)
+
+        prov.update({
+            "source": source,
+            "origin": origin,
+            "trust": round(trust, 3),
+            "origin_ref": prov.get("origin_ref") or observation.session_id,
+            "derived_from": upstream,
+        })
+        metadata["provenance"] = prov
+
+        status = MemoryStatus.ACTIVE
+        quarantine: dict[str, Any] | None = None
+        reason = should_quarantine(observation.content, trust)
+        if reason:
+            quarantine = {"trigger": "rule", "reason": reason}
+        if self._risk is not None:
+            risk = self._risk.score(observation.content, trust)
+            metadata["risk"] = {"p": risk.probability, "threshold": risk.threshold}
+            if quarantine is None and risk.flagged:
+                reason = (
+                    f"learned risk {risk.probability:.2f} >= {risk.threshold:.2f} "
+                    f"(signals: {', '.join(risk.top_features) or 'n/a'})"
+                )
+                quarantine = {"trigger": "model", "reason": reason, "features": risk.top_features}
+        if quarantine:
+            status = MemoryStatus.PENDING
+            quarantine["at"] = utcnow().isoformat()
+            metadata["quarantine"] = quarantine
+            logger.warning(f"Quarantined memory from session={observation.session_id}: {reason}")
+        return metadata, status
 
     async def ingest_batch(
         self,
