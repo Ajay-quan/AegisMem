@@ -356,6 +356,20 @@ class PostgresStore:
             metadata=record.extra_metadata or {},
         )
 
+    async def rls_effective(self) -> tuple[bool, str]:
+        """RLS is meaningless if the connecting role is a superuser or has BYPASSRLS."""
+        if self._engine.dialect.name != "postgresql":
+            return True, "not postgres"
+        async with self._engine.connect() as conn:
+            row = (await conn.exec_driver_sql(
+                "SELECT rolsuper, rolbypassrls, current_user FROM pg_roles WHERE rolname = current_user"
+            )).first()
+        if row is None:
+            return False, "cannot inspect current role"
+        if row[0] or row[1]:
+            return False, f"role '{row[2]}' is superuser or BYPASSRLS"
+        return True, f"role '{row[2]}'"
+
     async def ping(self) -> None:
         async with self._engine.connect() as conn:
             await conn.exec_driver_sql("SELECT 1")

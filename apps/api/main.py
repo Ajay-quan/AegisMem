@@ -40,7 +40,12 @@ async def lifespan(app: FastAPI):
         from apps.api.control import get_control_store
         from apps.api.dependencies import get_raw_db_store, get_raw_vector_store, get_graph_store
         await get_control_store()
-        await get_raw_db_store()
+        db = await get_raw_db_store()
+        if settings.is_production_like and settings.require_rls and hasattr(db, "rls_effective"):
+            ok, why = await db.rls_effective()
+            if not ok:
+                raise RuntimeError(f"Row-level security would be bypassed: {why}. Connect as a "
+                                   "non-superuser role without BYPASSRLS (or set REQUIRE_RLS=false).")
         await get_raw_vector_store()
         await get_graph_store()
         logger.info("All stores initialized successfully")

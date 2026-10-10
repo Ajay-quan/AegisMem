@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     control_database_url: str = ""
     dev_control_db_path: str = ".aegis/control.db"
     default_tenant: str = "default"
+    # Refuse to boot in staging/production if Postgres RLS cannot be enforced for the app role.
+    require_rls: bool = True
 
     # Observability
     metrics_enabled: bool = True
