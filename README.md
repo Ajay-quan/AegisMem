@@ -1,301 +1,89 @@
 # AegisMem
 
-**Persistent Memory Architecture for Long-Running LLM Agents**
+**The trust layer for AI agent memory.**
 
-AegisMem is a production-grade, open-source memory system for AI agents that solves long-term retention, context management, and memory quality at scale.
+Agents are getting long-term memory faster than companies can trust it. AegisMem makes sure that what an
+agent remembers is **true, current, safe and provably erasable**, and it gets better with every human decision.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-green.svg)](https://fastapi.tiangolo.com)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+| Problem in typical agent memory | AegisMem |
+|---|---|
+| A prompt injection in a web page or tool result becomes a "fact" | Provenance + trust on every write; low-trust instruction-like content is **quarantined** |
+| Updated or revoked facts keep being served | A **read-time guard** re-checks every result against the canonical record and swaps in the current version |
+| "Delete" leaves copies, summaries and vectors behind | **Cascading erasure** across versions, derivatives, duplicates and every store, with a **signed receipt** |
+| Screening rules never improve | **Continual learning** from reviewer decisions and corrections: calibrated per-origin trust, a self-improving risk model, learned ranking |
+| Context is lost between agents and sessions | **Handoff packets**: token-budgeted, cited briefings with open questions and recent changes |
 
----
+Run the free [integrity audit](audit/) against any memory system to see where it stands. A typical naive
+vector memory scores 1/7; AegisMem scores 7/7.
 
-## Why AegisMem?
-
-Most agent systems today treat memory as an afterthought:
-
-| Problem | AegisMem Solution |
-|---------|-------------------|
-| Memory is just raw chat history | Structured memory types: observations, facts, episodes, reflections |
-| Retrieval is only embedding similarity | Hybrid retrieval: semantic + recency + importance + symbolic filters |
-| Updates are append-only and ungoverned | Versioned, LLM-governed updates with full audit trail |
-| Contradictions are never resolved | Automatic contradiction detection and resolution workflow |
-| No higher-level synthesis | Reflection generation: patterns, preferences, behavioral insights |
-| Memory is never benchmarked | Built-in evaluation harness with retrieval and contradiction metrics |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI REST API                        │
-│          /ingest  /retrieve  /reflect  /contradictions       │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│                    Service Layer                              │
-│  IngestionService  RetrievalService  ReflectionService       │
-│  UpdateService     ContradictionService  EvaluationRunner    │
-└──────┬────────────────┬────────────────────┬────────────────┘
-       │                │                    │
-┌──────▼──────┐ ┌───────▼───────┐ ┌─────────▼──────┐
-│  PostgreSQL  │ │    Qdrant     │ │     Neo4j      │
-│  (canonical  │ │  (semantic    │ │    (entity     │
-│   records,   │ │   retrieval,  │ │   graph,       │
-│   versions,  │ │   ANN search) │ │   relations,   │
-│   audit log) │ └───────────────┘ │   contradicts) │
-└──────────────┘                   └────────────────┘
-       │                                    │
-┌──────▼────────────────────────────────────────────┐
-│  Redis (cache, session state, Celery broker)       │
-└────────────────────────────────────────────────────┘
-```
-
-### Multi-Store Design
-
-AegisMem uses four complementary stores — no single database represents the entire memory system:
-
-- **PostgreSQL** — canonical records, versioned history, audit logs, facts, evaluation results
-- **Qdrant** — vector index for semantic nearest-neighbor retrieval
-- **Neo4j** — entity-relationship graph for multi-hop reasoning, contradiction edges
-- **Redis** — session working memory, retrieval cache, Celery task queue
-
----
-
-## Memory Types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `observation` | Raw input from conversation or tool | "User asked about internship opportunities" |
-| `fact` | Discrete, verifiable structured fact | `user -> lives_in -> San Francisco` |
-| `episode` | Bounded event with temporal context | "Meeting on March 3rd resulted in..." |
-| `procedure` | Learned workflow or process | "To deploy: run tests, tag release, push" |
-| `reflection` | Higher-level synthesized insight | "User consistently prioritizes AI career paths" |
-| `summary` | Compressed summary of memory cluster | "Project history through Q2 2025" |
-| `working` | Transient in-session context | Current plan, recent tool outputs |
-
----
-
-## Memory Lifecycle
-
-```
-observe → score → store → embed → index → retrieve → rank
-                              ↓
-                         contradiction scan
-                              ↓
-                         versioned update (create|update|merge|supersede|skip)
-                              ↓
-                         reflection generation
-                              ↓
-                         summarize / archive / expire
-```
-
----
-
-## Hybrid Retrieval
-
-Retrieval score combines multiple signals — not just embeddings:
-
-```
-composite_score = 0.40 × semantic_similarity
-                + 0.25 × recency_score        (exponential decay)
-                + 0.25 × importance_score      (heuristic + LLM)
-                + 0.10 × access_frequency
-                - contradiction_penalty        (if flagged)
-```
-
----
-
-## Quickstart
-
-### Local (no external services)
+## Quickstart (no Docker)
 
 ```bash
-git clone https://github.com/your-org/aegismem
-cd aegismem
 pip install -e ".[dev]"
-
-# Run the demo (mock backends - no API keys needed)
-python examples/simple_chat_memory/demo.py
-
-# Run the benchmark
-python scripts/run_local_eval.py
+MEMORY_BACKEND=memory VECTOR_BACKEND=memory GRAPH_BACKEND=none uvicorn apps.api.main:app
 ```
-
-### With Docker (full stack)
-
-```bash
-cp .env.example .env
-# Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env
-
-docker compose -f infra/compose/docker-compose.yml up
-# API available at http://localhost:8000
-# Docs at http://localhost:8000/docs
-```
-
-### With observability (Prometheus + Grafana)
-
-```bash
-docker compose -f infra/compose/docker-compose.yml --profile observability up
-# Grafana at http://localhost:3000 (admin/admin)
-# Prometheus at http://localhost:9090
-```
-
----
-
-## API
-
-```bash
-# Ingest a memory
-curl -X POST http://localhost:8000/api/v1/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"text": "User prefers async Python APIs", "user_id": "alice"}'
-
-# Retrieve relevant memories
-curl -X POST http://localhost:8000/api/v1/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What does the user prefer?", "user_id": "alice", "top_k": 5}'
-
-# Smart update (versioned, LLM-governed)
-curl -X POST http://localhost:8000/api/v1/update \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "new_content": "User moved from SF to Austin"}'
-
-# Generate reflections
-curl -X POST http://localhost:8000/api/v1/reflect \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "alice"}'
-
-# Run evaluation suite
-curl -X POST http://localhost:8000/api/v1/eval/run
-```
-
-Full API docs: `http://localhost:8000/docs`
-
----
-
-## Evaluation
-
-AegisMem ships with a built-in evaluation harness:
-
-```bash
-# Run full benchmark
-python scripts/run_local_eval.py
-```
-
-**Benchmark results (mock LLM baseline):**
-
-| Metric | Score |
-|--------|-------|
-| Precision@5 | 0.60 |
-| MRR | 0.33 |
-| Contradiction F1 | 0.86 |
-| Avg Retrieval Latency | <1ms (mock) |
-
----
-
-## Integration with Local LLMs (Ollama)
-
-AegisMem is built with out-of-the-box support for [Ollama](https://ollama.com/), allowing you to run powerful LLMs completely locally, securing your agent memories without any cloud API keys.
-
-### 1. Install and Pull the Model
-Ensure you have Ollama installed on your system. Pull the model you intend to use (AegisMem defaults to `llama3.2`):
-```bash
-ollama run llama3.2
-```
-Once the model is spun up locally, you can exit the CLI prompt (`/bye`) and the daemon will remain active.
-
-### 2. Configure AegisMem
-By default, AegisMem's Docker stack is rigged to securely bridge internal networking to your host machine's Ollama instance natively via `host.docker.internal` port configurations.
-
-If running manually (without Docker), update your `.env` to match your local port:
-```env
-DEFAULT_LLM_PROVIDER=local
-DEFAULT_LLM_MODEL=llama3.2
-OLLAMA_BASE_URL=http://localhost:11434
-```
-
----
-
-## LLM Providers
-
-AegisMem is fully provider-agnostic. The internal factory can flexibly spool the provider you need at runtime:
 
 ```python
-# Ollama (Local)
-client = OllamaClient(base_url="http://localhost:11434", model="llama3.2")
+from aegismem_client import AegisMem          # pip install ./sdk/python
 
-# OpenAI
-client = OpenAIClient(api_key="sk-...", model="gpt-4o-mini")
-
-# Anthropic
-client = AnthropicClient(api_key="sk-ant-...", model="claude-3-haiku")
-
-# Mock (testing, no API key)
-client = MockLLMClient()
+async with AegisMem("http://localhost:8000") as mem:
+    await mem.ingest("User prefers aisle seats", user_id="u1")
+    w = await mem.ingest(page_text, user_id="u1", source_type="tool_output", origin="domain:example.com")
+    if w.quarantined: ...                     # held for review, never served as trusted memory
+    r = await mem.retrieve("seat preference", user_id="u1")
+    await mem.feedback(r.retrieval_id, user_id="u1", used=[r.results[0].memory_id])
+    brief = await mem.handoff(user_id="u1", task="book a flight", token_budget=800)
+    receipt = await mem.forget("u1", memory_ids=[...], reason="GDPR Art. 17 request")
 ```
 
----
+Also available: a [TypeScript SDK](sdk/typescript), an [MCP server](integrations/mcp) for any MCP client,
+and production deployment with [Docker Compose or Kubernetes](docs/DEPLOYMENT.md).
 
-## Repository Structure
+## How it works
 
 ```
-aegismem/
-├── apps/api/           # FastAPI application + routers
-├── core/               # Config, schemas, logging, exceptions
-├── domain/             # Memory scoring, evaluation
-├── adapters/           # LLM, embedding, vector, graph, relational adapters
-├── services/           # Ingest, retrieve, update, reflect, contradiction
-├── pipelines/          # Async pipeline definitions
-├── datasets/           # Synthetic & benchmark datasets
-├── tests/              # Unit, integration, API tests
-├── scripts/            # CLI tools
-├── examples/           # Runnable demos
-├── infra/              # Docker, Alembic migrations
-└── docs/               # Documentation
+write ──► provenance + learned trust ──► rule + risk-model screening ──► store │ quarantine
+                                                                                   │
+read  ──► hybrid retrieval ──► integrity guard (current version? expired? quarantined?
+                               erased? trusted enough? right tenant?) ──► learned ranking ──► agent
+                                                                                   │
+human outcomes (approve / reject / correct / confirm / used) ──► event log ──► trust, risk & ranking models
 ```
 
----
+- **Event-sourced learning.** Every learned update is an append-only event; models are deterministic replays,
+  consistent across replicas and rebuildable for audit. Risk-model events store keyed feature hashes, never text.
+- **Multi-tenant by construction.** Scoped stores in the app, Postgres row-level security in the database,
+  scoped API keys, per-tenant rate limits.
+- **Operable.** Idempotent writes, a durable index-repair outbox, `/ready` probes, Prometheus metrics,
+  OpenTelemetry traces (no content in telemetry), Alembic migrations.
 
-## Tests
+## Measured, not claimed
 
-```bash
-# All tests
-pytest
+`python -m bench.run` runs the gated benchmark suite (it also runs in CI):
 
-# With coverage
-pytest --cov=. --cov-report=html
+| Suite | Current result |
+|---|---|
+| Poisoning (held-out, cold start) | recall 0.58 vs 0.125 rules-only; false-positive rate 0.11; 0 false positives on users' own words |
+| Learning from reviewers (8 splits) | held-out recall 0.57 → 0.78 with FPR +0.02 |
+| Revocation (7 scenarios) | 0 revoked memories served; 100% replaced with the current version |
+| Erasure (20 subjects) | 0 residue, 100% cascade recall, 0 collateral, receipts tamper-evident |
+| Overhead | screening p95 ≈ 0.05 ms, guard p95 ≈ 0.05 ms (in-memory backends) |
 
-# Specific suite
-pytest tests/unit/
-pytest tests/integration/
-pytest tests/api/
-```
+The poisoning dataset is a small, deliberately hard internal set; treat these numbers as regression gates.
 
----
+## Repository map
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Language | Python 3.11+ |
-| API | FastAPI + Uvicorn |
-| Validation | Pydantic v2 |
-| ORM | SQLAlchemy 2.x + Alembic |
-| Relational Store | PostgreSQL |
-| Vector Store | Qdrant (+ in-memory fallback) |
-| Graph Store | Neo4j (+ mock fallback) |
-| Cache / Queue | Redis + Celery |
-| Embeddings | sentence-transformers / OpenAI |
-| LLM Providers | OpenAI, Anthropic, mock |
-| Agent Orchestration | LangGraph |
-| Observability | OpenTelemetry, Prometheus, Grafana |
-| Testing | pytest + pytest-asyncio |
-| Deployment | Docker + Compose |
-
----
+| Path | What |
+|---|---|
+| `apps/api` | FastAPI app, auth, idempotency, rate limits |
+| `services/` | ingest, retrieve, guard, erasure, outcomes, handoff, feedback, learning runtime, vector sync |
+| `domain/` | pure logic: provenance, receipts, scoring, trust calibrator, risk model, weight learner |
+| `adapters/` | Postgres, pgvector, Qdrant, Neo4j, in-memory stores, tenancy wrappers |
+| `bench/`, `audit/` | benchmark suite with gates; open-source integrity audit |
+| `sdk/`, `integrations/mcp` | Python and TypeScript clients; MCP server |
+| `infra/` | migrations, Dockerfile, compose, Kubernetes manifests |
+| `ROADMAP.md`, `PRODUCT_PLAN_12M.md`, `project_log.md` | strategy, plan, engineering log |
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE)
+Apache-2.0

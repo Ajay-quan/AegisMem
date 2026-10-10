@@ -240,3 +240,66 @@ features until that lands. An open decision for the founders is hosted-first vs 
 
 **Next (recommended order):** push the branch and get CI green on Postgres → pgvector single-store mode → outbox + idempotent ingest →
 OSS audit CLI (GTM wedge) → MCP server and TS SDK → RLS and rate limits → OTel.
+
+### 2026-10-10 · Session 7: Q1 continued, CP5–CP12 (branch `q1/production-core`, not pushed)
+
+**Interaction:** The user asked to continue the development completely. The push was not authorized, so all work is in local commits.
+
+**Checkpoints:**
+- `02bd8da` CP5, single-store mode:
+  - `adapters/vector_store/pgvector_store.py` (HNSW cosine; SQLite fallback for dev), `NullGraphStore`.
+  - Settings `vector_backend`/`graph_backend`, migration 0003.
+  - Vector-store **conformance kit** (`tests/integration/test_vector_store_contract.py`).
+  - CI image `pgvector/pgvector:pg16`.
+- `ee5bba1` CP6, reliable writes:
+  - `apps/api/idempotency.py` (Stripe semantics) on ingest, batch, corrections and forget.
+  - `services/vector_sync.py`: `ResilientVectorStore` + `OutboxWorker`. Failed index ops are queued with ids only, retried with backoff and dead-lettered. Erasure cancels pending repairs.
+  - The SDK sends a stable auto Idempotency-Key. Migration 0004.
+  - **Security fix:** `/ingest/batch` ignored per-item `source_type`, which let tool output bypass screening.
+- `2b7888b` CP7, `audit/` (`aegis-audit`):
+  - Seven checks: REV-1, DEL-1..3, POI-1..2, ISO-1.
+  - Targets: AegisMem, Mem0 REST (**unverified against a live Mem0**), and a naive reference.
+  - The naive reference scores 1/7; AegisMem scores 7/7 through HTTP.
+- `31fd03d` CP8, `integrations/mcp`: stdio JSON-RPC MCP server with remember/recall/handoff/correct/used/forget. Tested via a real subprocess.
+- `697954c` CP9:
+  - `sdk/typescript` (`@aegismem/client`), strict tsc.
+  - `MEMORY_BACKEND=memory` Docker-free dev mode.
+  - A pytest boots uvicorn and runs the TS e2e against it.
+- `b40cc78` + `73b4431` CP10, platform hardening:
+  - Per-tenant rate limits (`apps/api/ratelimit.py`; Redis Lua or in-process; off by default in tests via conftest).
+  - **Postgres RLS:** migration 0005 plus `core/tenancy_context.py`. The tenant is bound per transaction through `set_config`; `system_context()` is used for cross-tenant jobs. An AST test guarantees every wrapper call is tenant-bound.
+  - **Superusers bypass RLS**, so boot refuses a superuser or BYPASSRLS app role in prod (`REQUIRE_RLS`).
+  - OpenTelemetry (`core/observability/tracing.py`; W3C propagation, no content in attributes).
+- `65f4f1a` CP11, deployment:
+  - Hardened multi-stage Dockerfile.
+  - Single-store compose with owner/app roles and a migrate gate.
+  - Kustomize base and production overlay (verified with `kubectl kustomize`). Helm is not used yet.
+  - Deployment invariant tests and `docs/DEPLOYMENT.md`.
+- `2262f25` CP12: hourly pruning of the ledger and idempotency records, `aegisctl prune`, and `aegisctl backfill-tenant` for Qdrant (**untested, no Qdrant server locally**).
+- README rewritten for the integrity positioning.
+
+**Verification status:**
+- 168 tests passing, plus 3 skipped (Postgres RLS ×2 and the shared Redis limiter need CI services).
+- Bench gates pass with unchanged numbers. TS typecheck passes. Compose config and Kustomize render validate.
+- **Not verified:** Docker image build (daemon down), the Postgres/Redis paths (they run only in CI and CI has never run), the Mem0 adapter, and the Qdrant backfill.
+
+**Q1 engineering tracker (updated):**
+
+| Epic | % | Remaining |
+|---|---|---|
+| Durable state | 95 | first CI run on Postgres |
+| Multi-tenancy & auth | 95 | graph-node tenant stamping; CI verification of RLS |
+| Single-store mode & deploy | 85 | build and run the image; Helm chart (Kustomize ships today) |
+| Async pipeline / outbox | 85 | `FOR UPDATE SKIP LOCKED` for multi-replica workers (currently duplicate-safe, not exclusive); retire the legacy Celery worker |
+| Observability | 85 | Grafana dashboards JSON; alert rules as code |
+| Eval & benchmarks | 65 | public injection datasets, LongMemEval/LoCoMo recall-impact suite with a real embedding model, multilingual |
+| SDKs + MCP | 85 | LangGraph / OpenAI Agents SDK integrations; publish to PyPI/npm |
+| OSS integrity audit | 85 | verify the Mem0 adapter live; publish results responsibly |
+| **Q1 engineering overall** | **≈85%** | (design-partner recruiting is non-engineering and not counted) |
+
+**Next:**
+1. Push and get CI green (Postgres, pgvector, RLS and Redis paths).
+2. Build and smoke-test the image with compose.
+3. Public-benchmark suite with real embeddings.
+4. Framework integrations.
+5. Publish the SDKs and the audit.
