@@ -180,3 +180,63 @@ cross-tenant threat network (the moat).
 **Implication for engineering:** the next work is Q1 "production core" and starts with durable, tenant-scoped, event-sourced learning
 state (remove the in-process singletons in `apps/api/dependencies.py`), auth, pgvector mode, the outbox sync and `aegis-bench`. No new
 features until that lands. An open decision for the founders is hosted-first vs self-host-first (recommendation: hosted, with a VPC option).
+
+### 2026-10-10 · Session 6: Q1 execution, checkpoints CP0–CP4 (branch `q1/production-core`)
+
+**Interaction:** The user asked to start Q1 work immediately, in professional checkpoints, with a progress percentage and a full update at the end.
+
+**Environment notes:**
+- Docker was not running and there was no local Postgres. SQL code is tested on SQLite through the same SQLAlchemy async path. Postgres is
+  covered by CI (`.github/workflows/ci.yml` runs the Postgres 16 service, the alembic round-trip and the integration tests against it), but **CI has not run yet**
+  because nothing has been pushed.
+- The venv was moved from another path, so `.venv/bin/pip` has a broken shebang. Use `.venv/bin/python -m pip`.
+- `greenlet` was missing, which made every async SQLAlchemy call fail. That means `PostgresStore` had never worked in this venv. It is now a declared dependency.
+
+**Checkpoints (git commits):**
+- `505cdf7` CP0: committed sessions 1–5 and repo hygiene (.gitignore; untracked `__pycache__`, `.DS_Store`, `.env`).
+- `59af93f` CP1: durable learning state. Components are deterministic state machines (`apply`/`to_state`/`from_state`).
+  `services/learning_runtime.py` handles append → catch-up replay, so replicas converge, plus snapshots every 200 events and `rebuild`.
+  `adapters/relational_store/control_store.py` + `control_models.py` hold the event log, snapshots, receipts, ledger (atomic consume) and API keys.
+  The risk model uses tenant-keyed BLAKE2b feature hashing, and **its events store no plaintext**. Alembic env plus migration 0001.
+- `71bdac7` CP2: multi-tenancy and auth.
+  - `apps/api/auth.py`: API keys (peppered HMAC), 5 scopes, router-level `authorize` that **fails closed** on unmapped routes (a test
+    enforces that every route is mapped).
+  - `adapters/tenancy.py`: scoped memory and vector stores applied in DI. Methods are allow-listed, and cross-tenant access looks like a 404.
+  - Admin key API plus `scripts/aegisctl.py`.
+  - Boot guards: staging and production require auth, a real secret, a pepper and live stores.
+  - **Fixed silent data loss in `PostgresStore`:** `memory_layer`, `contradicted_by` and the retrieval counters were never persisted, and
+    `update_memory` dropped `parent_memory_ids`, `valid_to`, `confidence` and `tags`. Migration 0002 adds the columns and backfills the layer.
+- `89bf5c9` CP3: `bench/` (aegis-bench).
+  - Held-out dataset `bench/datasets/injection_v1.jsonl` (52 rows).
+  - Suites: poisoning, learning (8-seed mean), revocation, erasure and latency, with gates in `bench/thresholds.json` and pytest gate tests.
+  - Learning fixes the bench found: `SOURCE_SPILLOVER` 0.5→0.1, `INHERIT_FLOOR` 0.8, experience replay against seed anchors, and cost-asymmetric
+    threshold tuning. Decision rationale: at production base rates FPR dominates reviewer cost, so the FPR-conservative config was chosen.
+  - Heavy dependencies moved to extras.
+- `6edf116` CP4: `sdk/python` (`aegismem-client`), whose retry policy never re-sends a state-creating write that may have reached the server.
+  Prometheus `/metrics` (no ids in labels), `/ready` probe, and the ingest response now exposes quarantine status.
+
+**Bench baseline (`python -m bench.run`):**
+- poisoning: recall 0.58 (rules-only 0.125), FPR 0.107, user-message FP 0.
+- learning: recall 0.57→0.78, FPR +0.018.
+- revocation: 0 leaks across 7 scenarios.
+- erasure: 0 residue, cascade recall 1.0.
+- screening p95 0.05 ms, guard p95 0.04 ms.
+
+**Tests:** 136 passing.
+
+**Q1 progress tracker (engineering):**
+
+| Epic | % | Remaining |
+|---|---|---|
+| Durable state | 90 | Postgres verification in CI; scheduled ledger pruning |
+| Multi-tenancy & auth | 75 | Postgres RLS, per-tenant rate limits/quotas, graph tenant stamping, backfill script for pre-tenancy vector payloads |
+| Single-store mode (pgvector, Helm) | 0 | all |
+| Async pipeline / outbox | 0 | all (also server-side Idempotency-Key for ingest) |
+| Observability | 60 | OpenTelemetry tracing, Grafana dashboards and alerts in Helm |
+| Eval & benchmarks | 65 | public injection datasets, LongMemEval/LoCoMo recall-impact suite, multilingual |
+| SDKs + MCP | 35 | TypeScript SDK, MCP server, LangGraph/OpenAI Agents SDK integrations |
+| OSS Integrity Audit CLI | 0 | all |
+| **Q1 engineering overall** | **≈41%** | |
+
+**Next (recommended order):** push the branch and get CI green on Postgres → pgvector single-store mode → outbox + idempotent ingest →
+OSS audit CLI (GTM wedge) → MCP server and TS SDK → RLS and rate limits → OTel.

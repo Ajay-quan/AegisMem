@@ -45,7 +45,11 @@ intake, HR, legal, enterprise copilots), where a security or privacy review curr
 | Retrieval feedback and per-user learned ranking weights | `domain/learning/`, `services/feedback_service.py` | done |
 | **Outcome-calibrated trust** (continual learning from reviews, corrections, confirmations and usage; retroactive distrust) | `domain/learning/trust_calibrator.py`, `services/outcome_service.py`; `/corrections`, `/memories/{id}/confirm`, `/quarantine/{id}/reject`, `/trust/sources` | done |
 
-## Next (P1 completion)
+## Q1 production core status
+See the progress tracker in `project_log.md` (Session 6). Shipped on branch `q1/production-core`: durable event-sourced learning state,
+multi-tenancy with API-key auth, aegis-bench with CI gates, Python SDK, metrics/readiness.
+
+## Next (P1 completion, original list)
 - [ ] Persist receipts, quarantine decisions, learner state and the feedback ledger in Postgres (Alembic migration).
 - [ ] `scripts/integrity_audit.py`: backend-agnostic audit suite (revocation leak, delete residue, poisoning acceptance,
       laundering through reflection). Run it against AegisMem and publish the numbers.
