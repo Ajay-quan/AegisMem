@@ -20,6 +20,7 @@ from typing import Any
 
 from core.config.settings import settings
 from core.exceptions import MemoryNotFoundError
+from core.observability.metrics import ERASED_ITEMS, ERASURES
 from domain.integrity import receipts
 from domain.integrity.provenance import derived_from
 
@@ -125,6 +126,10 @@ class ErasureService:
         }
         receipt = {"body": body, "signature": receipts.sign(self._key, body), "alg": "HMAC-SHA256"}
         await self._receipts.put(receipt)
+        tenant = getattr(self._db, "tenant_id", "unscoped")
+        ERASURES.labels(tenant, str(body["verified"]).lower()).inc()
+        for e in erased:
+            ERASED_ITEMS.labels(tenant, e["relation"]).inc()
         logger.info(
             f"Erasure {body['receipt_id']} user={user_id} erased={len(erased)} verified={body['verified']}"
         )

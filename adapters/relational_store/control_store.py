@@ -37,6 +37,10 @@ class ControlStore:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+    async def ping(self) -> None:
+        async with self._engine.connect() as conn:
+            await conn.exec_driver_sql("SELECT 1")
+
     async def close(self) -> None:
         await self._engine.dispose()
 

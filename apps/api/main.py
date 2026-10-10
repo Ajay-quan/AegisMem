@@ -1,6 +1,7 @@
 """AegisMem FastAPI application."""
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 import uuid
@@ -18,6 +19,8 @@ from apps.api.admin_router import admin_router
 from apps.api.auth import authorize, require_admin
 from adapters.tenancy import TenantViolation
 from core.exceptions import MemoryNotFoundError
+from core.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS, REGISTRY
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from apps.api.schemas import HealthResponse
 
 setup_logging(settings.log_level)
@@ -99,6 +102,9 @@ def create_app() -> FastAPI:
         start = time.time()
         response = await call_next(request)
         duration_ms = (time.time() - start) * 1000
+        route = getattr(request.scope.get("route"), "path", "unmatched")  # template, not raw path
+        HTTP_REQUESTS.labels(request.method, route, str(response.status_code)).inc()
+        HTTP_LATENCY.labels(request.method, route).observe(duration_ms / 1000)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time"] = f"{duration_ms:.1f}ms"
         logger.info(
@@ -137,6 +143,32 @@ def create_app() -> FastAPI:
                 "config": settings.app_env,
             },
         )
+
+    @app.get("/ready", tags=["system"])
+    async def ready():
+        """Readiness: every durable dependency answers. Kubernetes should gate traffic on this."""
+        from apps.api.control import get_control_store
+        from apps.api.dependencies import get_raw_db_store
+        checks: dict[str, str] = {}
+        for name, probe in (("control_store", get_control_store), ("memory_store", get_raw_db_store)):
+            try:
+                store = app.dependency_overrides.get(probe, probe)()
+                if inspect.isawaitable(store):
+                    store = await store
+                await store.ping()
+                checks[name] = "ok"
+            except Exception as e:  # report, don't raise: readiness must always answer
+                checks[name] = f"error: {type(e).__name__}"
+        ok = all(v == "ok" for v in checks.values())
+        return JSONResponse(status_code=200 if ok else 503,
+                            content={"status": "ready" if ok else "not_ready", "checks": checks})
+
+    @app.get("/metrics", tags=["system"], include_in_schema=False)
+    async def metrics():
+        """Prometheus scrape endpoint. Expose only on the internal network (see deploy docs)."""
+        if not settings.metrics_enabled:
+            return Response(status_code=404)
+        return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/", tags=["system"])
     async def root():

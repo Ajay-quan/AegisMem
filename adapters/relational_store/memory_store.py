@@ -83,5 +83,8 @@ class InMemoryMemoryStore:
     async def get_operation_logs(self, memory_id: str):
         return []
 
+    async def ping(self):
+        return None
+
     async def close(self):
         pass

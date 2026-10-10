@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     dev_control_db_path: str = ".aegis/control.db"
     default_tenant: str = "default"
 
+    # Observability
+    metrics_enabled: bool = True
+
     # Auth. Disabled only in development; staging/production refuse to boot without it.
     auth_enabled: bool = False
     api_key_pepper: str = ""

@@ -354,5 +354,9 @@ class PostgresStore:
             metadata=record.extra_metadata or {},
         )
 
+    async def ping(self) -> None:
+        async with self._engine.connect() as conn:
+            await conn.exec_driver_sql("SELECT 1")
+
     async def close(self) -> None:
         await self._engine.dispose()

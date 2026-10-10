@@ -74,6 +74,9 @@ async def ingest_memory(
         importance_score=memory.importance_score,
         content_preview=memory.content[:200],
         created_at=memory.created_at,
+        status=memory.status if isinstance(memory.status, str) else memory.status.value,
+        quarantine_reason=(memory.metadata.get("quarantine") or {}).get("reason"),
+        trust=(memory.metadata.get("provenance") or {}).get("trust"),
     )
 
 

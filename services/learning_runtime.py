@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from adapters.relational_store.control_store import ControlStore
+from core.observability.metrics import LEARNING_EVENTS
 from domain.learning.risk_model import COMPONENT as RISK, OnlineRiskModel
 from domain.learning.trust_calibrator import COMPONENT as TRUST, TrustCalibrator
 from domain.learning.weight_learner import COMPONENT_PREFIX as WEIGHTS, OnlineWeightLearner, UserWeightModel
@@ -88,6 +89,7 @@ class LearningRuntime:
     def _journal(self, tenant_id: str, component: str) -> Callable:
         async def journal(event: dict[str, Any]) -> None:
             await self._store.append_event(tenant_id, component, event)
+            LEARNING_EVENTS.labels(tenant_id, component.split("/")[0]).inc()
             handle = self._handles.get((tenant_id, component))
             if handle is not None:
                 await self._catch_up(tenant_id, component, handle)

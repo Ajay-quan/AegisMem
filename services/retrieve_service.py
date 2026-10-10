@@ -19,6 +19,7 @@ from core.schemas.memory import (
     MemoryItem, RetrievalQuery, RetrievalResult, RetrievalCandidate,
 )
 from domain.memory.scoring import score_memory_for_retrieval, rank_candidates
+from core.observability.metrics import GUARD_DECISIONS
 from domain.memory.reranker import HeuristicReranker
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class RetrievalService:
             from services.guard_service import MemoryGuard
             guard = MemoryGuard(relational_store)
         self._guard = guard
+        self._tenant = getattr(relational_store, "tenant_id", "unscoped")
         self._reranker = HeuristicReranker(
             diversity_threshold=settings.diversity_threshold,
         )
@@ -150,6 +152,7 @@ class RetrievalService:
                 memory, decision = await self._guard.resolve(memory_id, query.user_id, cache)
                 if decision.action != "serve":
                     report.append(decision.to_dict())
+                    GUARD_DECISIONS.labels(self._tenant, decision.action, decision.reason).inc()
                 if memory is None or memory.memory_id in seen:
                     continue
                 seen.add(memory.memory_id)

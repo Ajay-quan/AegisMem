@@ -11,6 +11,7 @@ from core.schemas.memory import (
 from domain.integrity.provenance import (
     base_trust, derived_from, derived_trust, get_trust, should_quarantine,
 )
+from core.observability.metrics import WRITES
 from domain.memory.scoring import compute_importance_heuristic
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,8 @@ class IngestionService:
             quarantine["at"] = utcnow().isoformat()
             metadata["quarantine"] = quarantine
             logger.warning(f"Quarantined memory from session={observation.session_id}: {reason}")
+        WRITES.labels(getattr(self._db, "tenant_id", "unscoped"), source,
+                      f"quarantined_{quarantine['trigger']}" if quarantine else "stored").inc()
         return metadata, status
 
     async def ingest_batch(

@@ -30,6 +30,7 @@ from adapters.relational_store.control_models import ApiKeyRecord
 from adapters.relational_store.control_store import ControlStore
 from apps.api.control import get_control_store
 from core.config.settings import settings
+from core.observability.metrics import AUTH_FAILURES
 
 logger = logging.getLogger(__name__)
 
@@ -123,10 +124,12 @@ async def get_principal(
                          name="auth-disabled")
     raw = _extract_key(request)
     if not raw or not raw.startswith(KEY_PREFIX):
+        AUTH_FAILURES.labels("missing_or_malformed").inc()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing or malformed API key",
                             headers={"WWW-Authenticate": "Bearer"})
     record = await store.find_api_key(hash_key(raw))
     if record is None or record.revoked_at is not None:
+        AUTH_FAILURES.labels("invalid_or_revoked").inc()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or revoked API key",
                             headers={"WWW-Authenticate": "Bearer"})
     now = time.monotonic()
@@ -148,6 +151,7 @@ async def authorize(
         logger.error(f"Unmapped route {request.method} {rel}: denied (fail closed)")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "route has no authorization policy")
     if not principal.has(scope):
+        AUTH_FAILURES.labels("insufficient_scope").inc()
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"API key lacks scope '{scope}'")
     request.state.principal = principal
     return principal

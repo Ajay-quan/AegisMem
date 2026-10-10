@@ -29,6 +29,9 @@ class IngestResponse(BaseModel):
     importance_score: float
     content_preview: str
     created_at: datetime
+    status: str = Field(default="active", description="'active', or 'pending' if quarantined for review")
+    quarantine_reason: str | None = None
+    trust: float | None = None
 
 
 class BatchIngestRequest(BaseModel):
