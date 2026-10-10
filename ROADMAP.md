@@ -46,7 +46,7 @@ intake, HR, legal, enterprise copilots), where a security or privacy review curr
 | **Outcome-calibrated trust** (continual learning from reviews, corrections, confirmations and usage; retroactive distrust) | `domain/learning/trust_calibrator.py`, `services/outcome_service.py`; `/corrections`, `/memories/{id}/confirm`, `/quarantine/{id}/reject`, `/trust/sources` | done |
 
 ## Q1 production core status
-See the progress tracker in `project_log.md` (Session 7, ≈85% of Q1 engineering). Shipped on branch `q1/production-core`: durable event-sourced learning state,
+**Q1 engineering complete (100%)**, verified on real infrastructure. See `project_log.md` Session 8. Shipped on branch `q1/production-core`: durable event-sourced learning state,
 multi-tenancy with API-key auth and Postgres RLS, rate limits, aegis-bench with CI gates, Python + TypeScript SDKs,
 MCP server, aegis-audit, pgvector single-store mode, idempotent writes + index-repair outbox, metrics/tracing/readiness,
 Docker/Compose/Kubernetes deployment.

@@ -303,3 +303,59 @@ OSS audit CLI (GTM wedge) → MCP server and TS SDK → RLS and rate limits → 
 3. Public-benchmark suite with real embeddings.
 4. Framework integrations.
 5. Publish the SDKs and the audit.
+
+### 2026-10-10 · Session 8: Q1 completed (CP13 onward), verified on real infrastructure
+
+**Interaction:** The user asked to complete Q1 to 100%. Docker Desktop was started locally to verify against real services. Test
+containers, a kind cluster, Homebrew tools (helm, kind, actionlint), and the Ollama model `nomic-embed-text` were added to the machine.
+Still **not pushed**: pushing needs the user's approval, and publishing needs their registry credentials.
+
+**Verification infrastructure used:** Postgres 16 + pgvector (Docker, :55432), Redis 7 (:56379), Qdrant 1.17 (:56333),
+Ollama `nomic-embed-text` (768-d), a Docker Compose stack in staging config (:58000), and a kind cluster with Helm.
+
+**Critical bugs found only by real infrastructure (all fixed):**
+1. Qdrant `search()` was removed in the current qdrant-client, so **every Qdrant retrieval failed**. Moved to `query_points`.
+2. The embedding factory never implemented `openai`/`voyage`, and **production silently used mock vectors** when no LLM key was set.
+   There is now an OpenAI-compatible backend; mock is dev-only; a boot dimension probe was added.
+3. **Ranking cost 28 points of recall** (LoCoMo recall@5 was 0.262 vs 0.540 for raw search). The cause was an access-count popularity feedback loop
+   plus query-independent weights. Raw access was replaced with utility, and the defaults are now relevance-dominant. Result: **0.521 vs 0.514 raw**.
+4. Migrations in the container crashed because newer SQLAlchemy defaults `postgresql://` to psycopg3. The driver is now pinned.
+5. Helm: the pre-install hook referenced a not-yet-created ServiceAccount, and the install hung.
+6. Kubernetes service links (`POSTGRES_PORT=tcp://…`) broke settings. Fixed with `enableServiceLinks: false`.
+7. Model and migration drift on the HNSW index.
+8. Risk-model selection bias (labels only for held items) produced 20% FPR after learning. Implicit benign signals from used memories fixed it (FPR 0.07).
+
+**Built:**
+- Exclusive outbox claims (`FOR UPDATE SKIP LOCKED` + lease). Graph nodes carry tenant_id.
+- Alert rules (8, promtool-validated) and a Grafana dashboard (12 panels), provisioned in compose and verified live.
+- Helm chart `infra/helm/aegismem`, installed and upgraded on kind.
+- `bench/locomo.py` (recall impact with real embeddings) and the external deepset dataset suite (EN+DE, gated).
+- The tool catalogue was moved into the SDK (`aegismem_client.tools`).
+- `integrations/frameworks`: LangChain/LangGraph tools plus `handoff_node`, and OpenAI Agents SDK FunctionTools.
+- aegis-audit `mem0-lib` target. Results: Mem0 OSS 2.2.1 scores 5/7 (infer) and 4/7 (no infer); AegisMem scores 7/7 under compose and Helm.
+- Release automation (`release.yml`): PyPI OIDC, npm provenance, a multi-arch GHCR image with SBOM, and a Helm OCI chart. All packages pass `twine check --strict`.
+- Image slimmed from 841 to 584 MB. The no-op Celery worker was retired.
+
+**Final verification:**
+- 205 tests passed with 0 skipped, on live Postgres, Redis and Qdrant.
+- All bench gates pass.
+- Migrations are clean on Postgres and SQLite.
+- `helm lint --strict` and actionlint pass.
+- The audit scores 7/7 on compose and on Helm.
+- RLS was proven in the deployed database: app role with no or a foreign tenant sees 0 rows; it cannot run DDL.
+
+**Q1 engineering tracker: 100%.** Every Q1 epic in `PRODUCT_PLAN_12M.md` is implemented and verified. What remains is not engineering:
+
+| Item | Owner / blocker |
+|---|---|
+| Push branch, open PR, first GitHub CI run | needs the user's approval |
+| First release (tag `v0.1.0`) | user: configure PyPI trusted publishers + `NPM_TOKEN` |
+| Publish Mem0 audit results | responsible disclosure to Mem0 first |
+| Design partners (3–5) | founder-led sales |
+| Unexplained one-off: first live-PG run had 16 fixture errors that never recurred in 8+ runs | watch in CI |
+
+**Local cleanup notes:**
+- Test containers: `aegis-test-pg`, `aegis-test-redis`, `aegis-test-qdrant`.
+- Compose project: `aegis-smoke`.
+- kind cluster: `aegis`.
+- Isolated Mem0 venv: in the session scratchpad.
