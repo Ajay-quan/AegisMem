@@ -121,6 +121,62 @@ class Mem0Target:
 
 
 # ---------------------------------------------------------------------------
+# Mem0 open-source library, in process (`pip install mem0ai`). ``config`` is a Mem0 config
+# dict (vector store, embedder, llm). Uses infer=False so the audit measures storage and
+# retrieval semantics, not an LLM's extraction choices.
+# ---------------------------------------------------------------------------
+
+class Mem0LibraryTarget:
+    name = "mem0-oss-library"
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        from mem0 import Memory  # lazy: optional dependency
+        config = dict(config)
+        self._infer = bool(config.pop("infer", False))  # True = Mem0's default LLM extraction
+        self.name = f"mem0-oss-library(infer={self._infer})"
+        self._mem = Memory.from_config(config)
+
+    async def _run(self, fn: Any, *a: Any, **kw: Any) -> Any:
+        import asyncio
+        return await asyncio.to_thread(fn, *a, **kw)
+
+    async def add(self, user_id: str, text: str, source: Source = "user") -> str:
+        role = "user" if source == "user" else "assistant"
+        r = await self._run(self._mem.add, [{"role": role, "content": text}], user_id=user_id,
+                            metadata={"source": source}, infer=self._infer)
+        results = r.get("results", []) if isinstance(r, dict) else r
+        if not results:
+            # With infer=True the LLM may decline to store anything: that is a valid outcome,
+            # and the checks still judge what search returns afterwards.
+            return ""
+        return results[0]["id"]
+
+    async def search(self, user_id: str, query: str, k: int = 10) -> list[str]:
+        try:
+            r = await self._run(self._mem.search, query, top_k=k, filters={"user_id": user_id})
+        except TypeError:
+            r = await self._run(self._mem.search, query, user_id=user_id, limit=k)
+        rows = r.get("results", []) if isinstance(r, dict) else r
+        return [row.get("memory", "") for row in rows]
+
+    async def update(self, user_id: str, memory_id: str, new_text: str) -> None:
+        if not memory_id:
+            raise Unsupported("nothing was stored to update (LLM extraction dropped it)")
+        await self._run(self._mem.update, memory_id, text=new_text)
+
+    async def delete(self, user_id: str, memory_id: str) -> None:
+        if not memory_id:
+            raise Unsupported("nothing was stored to delete (LLM extraction dropped it)")
+        await self._run(self._mem.delete, memory_id)
+
+    async def delete_user(self, user_id: str) -> None:
+        await self._run(self._mem.delete_all, user_id=user_id)
+
+    async def close(self) -> None:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Reference: a typical naive vector memory (soft delete, append-only updates, no screening).
 # Used to calibrate the audit and as a teaching example of common failure modes.
 # ---------------------------------------------------------------------------

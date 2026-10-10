@@ -38,3 +38,20 @@ by countering the selection bias of only labelling held items.
 
 `python -m bench.run`: poisoning, learning (8 splits), revocation (0 leaks), erasure (0 residue), latency, and
 external injection. All gates pass; thresholds are in `thresholds.json`.
+
+## Integrity audit across systems (aegis-audit 0.1.0)
+
+| System | Score | Failed checks |
+|---|---|---|
+| AegisMem: Docker Compose (staging config, RLS, Ollama nomic-embed-text) | **7/7** | none |
+| AegisMem: Helm on kind, 2 replicas | **7/7** | none |
+| Mem0 OSS 2.2.1, `infer=True` (default; local llama3.2 extractor, Qdrant, nomic-embed-text) | 5/7 | DEL-2 duplicate copy survived deletion; POI-2 covert behavioural instruction persisted |
+| Mem0 OSS 2.2.1, `infer=False` | 4/7 | DEL-2; POI-1 injected instruction from tool output served (critical); POI-2 |
+| Naive vector store (reference) | 1/7 | all but ISO-1 |
+
+Caveats: single run per configuration; Mem0's extraction quality depends on the LLM (a stronger hosted
+model may change POI results); checks are judged on returned text. **Do not publish vendor results
+before notifying the vendor (responsible disclosure) and re-running on their recommended configuration.**
+
+Reproduce Mem0: `pip install mem0ai`, then `aegis-audit --target mem0-lib --mem0-config mem0.json`
+where `mem0.json` holds a Mem0 config (`vector_store`, `embedder`, `llm`) plus optional `"infer": true`.

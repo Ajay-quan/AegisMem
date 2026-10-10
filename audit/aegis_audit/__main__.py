@@ -17,12 +17,16 @@ from pathlib import Path
 
 from aegis_audit.checks import CHECKS, run_checks
 from aegis_audit.report import summarize, to_markdown
-from aegis_audit.targets import AegisMemTarget, Mem0Target, NaiveVectorTarget
+from aegis_audit.targets import AegisMemTarget, Mem0LibraryTarget, Mem0Target, NaiveVectorTarget
 
 
 def build_target(args: argparse.Namespace):
     if args.target == "naive":
         return NaiveVectorTarget()
+    if args.target == "mem0-lib":
+        if not args.mem0_config:
+            raise SystemExit("--mem0-config <file.json> is required for mem0-lib")
+        return Mem0LibraryTarget(json.loads(Path(args.mem0_config).read_text()))
     if not args.url:
         raise SystemExit("--url is required for this target")
     cls = {"aegismem": AegisMemTarget, "mem0": Mem0Target}[args.target]
@@ -52,7 +56,8 @@ async def main_async(args: argparse.Namespace) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="aegis-audit", description="Integrity audit for agent memory")
-    ap.add_argument("--target", required=True, choices=["aegismem", "mem0", "naive"])
+    ap.add_argument("--target", required=True, choices=["aegismem", "mem0", "mem0-lib", "naive"])
+    ap.add_argument("--mem0-config", help="Mem0 config JSON (vector_store, embedder, llm) for mem0-lib")
     ap.add_argument("--url")
     ap.add_argument("--api-key")
     ap.add_argument("--checks", nargs="*", choices=[c[0] for c in CHECKS])
