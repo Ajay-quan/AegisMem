@@ -31,6 +31,7 @@ from services.feedback_service import FeedbackService, SqlRetrievalLedger
 from services.handoff_service import HandoffService
 from services.erasure_service import ErasureService, SqlReceiptStore
 from services.learning_runtime import LearningRuntime
+from services.vector_sync import ResilientVectorStore
 from domain.learning import OnlineWeightLearner
 from domain.learning.trust_calibrator import TrustCalibrator
 from domain.learning.risk_model import OnlineRiskModel
@@ -182,8 +183,9 @@ async def get_db_store(
 async def get_vector_store(
     raw: Annotated[InMemoryVectorStore, Depends(get_raw_vector_store)],
     tenant: Annotated[str, Depends(get_tenant_id)],
+    control: Annotated[ControlStore, Depends(get_control_store)],
 ) -> TenantScopedVectorStore:
-    return TenantScopedVectorStore(raw, tenant)
+    return TenantScopedVectorStore(ResilientVectorStore(raw, control, tenant), tenant)
 
 
 def get_embedding() -> EmbeddingBackend:

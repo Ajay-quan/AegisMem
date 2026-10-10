@@ -1,6 +1,7 @@
 """AegisMem FastAPI application."""
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import time
@@ -39,12 +40,23 @@ async def lifespan(app: FastAPI):
         await get_raw_vector_store()
         await get_graph_store()
         logger.info("All stores initialized successfully")
+        if settings.outbox_worker_enabled:
+            from apps.api.dependencies import get_embedding
+            from services.vector_sync import OutboxWorker
+            worker = OutboxWorker(await get_control_store(), await get_raw_db_store(),
+                                  await get_raw_vector_store(), get_embedding(),
+                                  max_attempts=settings.outbox_max_attempts)
+            app.state.outbox_task = asyncio.create_task(
+                worker.run_forever(settings.outbox_interval_seconds))
     except Exception as e:
         if settings.is_production_like:
             raise  # fail closed: never serve without durable stores
         logger.warning(f"Store initialization warning: {e}")
     yield
     logger.info("AegisMem shutting down")
+    task = getattr(app.state, "outbox_task", None)
+    if task is not None:
+        task.cancel()
     try:
         from apps.api.dependencies import _db_store, _graph_store
         if _db_store:

@@ -102,7 +102,7 @@ class TestRetryPolicy:
             assert await c.trust_sources() == []
         assert len(calls) == 3
 
-    async def test_writes_are_not_retried_after_reaching_server(self, monkeypatch):
+    async def test_writes_retry_with_a_stable_idempotency_key(self, monkeypatch):
         monkeypatch.setattr("asyncio.sleep", _no_sleep)
         calls = []
 
@@ -112,6 +112,19 @@ class TestRetryPolicy:
         async with self._client(handler) as c:
             with pytest.raises(ServerError):
                 await c.ingest("x", user_id="u")
+        keys = {r.headers.get("idempotency-key") for r in calls}
+        assert len(calls) == 4 and len(keys) == 1 and None not in keys
+
+    async def test_non_idempotent_writes_are_not_retried_after_reaching_server(self, monkeypatch):
+        monkeypatch.setattr("asyncio.sleep", _no_sleep)
+        calls = []
+
+        def handler(req):
+            calls.append(req)
+            return httpx.Response(503, json={"detail": "busy"})
+        async with self._client(handler) as c:
+            with pytest.raises(ServerError):
+                await c.release("m1", "u")
         assert len(calls) == 1
 
     async def test_writes_retry_when_connection_never_opened(self, monkeypatch):

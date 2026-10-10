@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # Observability
     metrics_enabled: bool = True
 
+    # Vector-sync outbox worker (repairs index writes that failed inline)
+    outbox_worker_enabled: bool = True
+    outbox_interval_seconds: float = 5.0
+    outbox_max_attempts: int = 8
+
     # Auth. Disabled only in development; staging/production refuse to boot without it.
     auth_enabled: bool = False
     api_key_pepper: str = ""

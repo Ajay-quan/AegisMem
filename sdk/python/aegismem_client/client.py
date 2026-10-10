@@ -1,16 +1,18 @@
 """Async and sync AegisMem clients.
 
-Retry policy: idempotent calls (reads, verification, feedback, which the server de-duplicates
-by retrieval_id) are retried on connection errors, 429 and 5xx with exponential backoff and
-jitter, honouring ``Retry-After``. Writes that create state (ingest, corrections, forget) are
-**not** retried after the request may have reached the server, so a timeout can never
-silently double-write. They are retried only when the connection failed before sending.
+Retry policy: reads, verification and feedback (de-duplicated by retrieval_id) are retried on
+connection errors, 429 and 5xx with exponential backoff and jitter, honouring ``Retry-After``.
+State-creating writes (ingest, batch, corrections, forget) carry an auto-generated
+``Idempotency-Key`` that stays the same across retries, so the server executes them at most
+once and they are retried too. Writes without server-side idempotency (confirm, release,
+reject) are retried only when the connection failed before sending.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import random
+import uuid
 from typing import Any, Literal
 
 import httpx
@@ -19,6 +21,10 @@ from aegismem_client import models as m
 from aegismem_client.errors import AegisMemError, error_for
 
 DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+
+
+def _new_key() -> str:
+    return f"sdk-{uuid.uuid4()}"
 USER_AGENT = "aegismem-python/0.1.0"
 
 
@@ -55,11 +61,14 @@ class AegisMem:
     # ------------------------------------------------------------------
 
     async def _request(self, method: str, path: str, *, idempotent: bool,
-                       json: Any = None, params: dict[str, Any] | None = None) -> Any:
+                       json: Any = None, params: dict[str, Any] | None = None,
+                       idempotency_key: str | None = None) -> Any:
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        idempotent = idempotent or idempotency_key is not None
         attempt = 0
         while True:
             try:
-                resp = await self._http.request(method, path, json=json, params=params)
+                resp = await self._http.request(method, path, json=json, params=params, headers=headers)
             except (httpx.ConnectError, httpx.ConnectTimeout) as e:
                 # Never reached the server: safe to retry any call.
                 if attempt >= self.max_retries:
@@ -69,6 +78,10 @@ class AegisMem:
                 if not idempotent or attempt >= self.max_retries:
                     raise AegisMemError(f"transport error: {e}") from e
             else:
+                if resp.status_code == 409 and idempotency_key and attempt < self.max_retries:
+                    await asyncio.sleep(float(resp.headers.get("retry-after", "1")))
+                    attempt += 1
+                    continue  # same key still executing on the server
                 if resp.status_code < 400:
                     return resp.json() if resp.content else None
                 retryable = resp.status_code == 429 or resp.status_code >= 500
@@ -102,6 +115,7 @@ class AegisMem:
         source_type: Literal["user_message", "agent_observation", "tool_output", "ingestion",
                              "reflection", "system"] = "user_message",
         origin: str | None = None, metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> m.WriteResult:
         """Store a memory. Pass ``origin`` (e.g. ``"tool:web_search"``, ``"domain:example.com"``)
         so trust can be learned per origin. Check ``result.quarantined``."""
@@ -110,7 +124,8 @@ class AegisMem:
             meta["origin"] = origin
         body = {"text": text, "user_id": user_id, "session_id": session_id, "agent_id": agent_id,
                 "memory_type": memory_type, "source_type": source_type, "metadata": meta}
-        return m.WriteResult(**await self._request("POST", "/ingest", json=body, idempotent=False))
+        return m.WriteResult(**await self._request("POST", "/ingest", json=body, idempotent=False,
+                                                   idempotency_key=idempotency_key or _new_key()))
 
     async def retrieve(self, query: str, user_id: str, *, top_k: int = 5, namespace: str = "",
                        memory_types: list[str] | None = None, min_importance: float = 0.0) -> m.RetrieveResult:
@@ -138,7 +153,8 @@ class AegisMem:
                       corrected_text: str = "", note: str = "") -> m.CorrectionResult:
         body = {"memory_id": memory_id, "user_id": user_id, "kind": kind,
                 "corrected_text": corrected_text, "note": note}
-        return m.CorrectionResult(**await self._request("POST", "/corrections", json=body, idempotent=False))
+        return m.CorrectionResult(**await self._request("POST", "/corrections", json=body, idempotent=False,
+                                                        idempotency_key=_new_key()))
 
     async def confirm(self, memory_id: str, user_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/memories/{memory_id}/confirm",
@@ -168,7 +184,8 @@ class AegisMem:
                      all_for_user: bool = False, reason: str = "") -> m.ErasureReceipt:
         body = {"user_id": user_id, "memory_ids": memory_ids or [], "all_for_user": all_for_user,
                 "reason": reason}
-        return m.ErasureReceipt(**await self._request("POST", "/forget", json=body, idempotent=False))
+        return m.ErasureReceipt(**await self._request("POST", "/forget", json=body, idempotent=False,
+                                                      idempotency_key=_new_key()))
 
     async def get_receipt(self, receipt_id: str) -> m.ErasureReceipt:
         return m.ErasureReceipt(**await self._request("GET", f"/receipts/{receipt_id}", idempotent=True))

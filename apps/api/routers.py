@@ -4,15 +4,18 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from apps.api.dependencies import (
     get_ingest_service, get_retrieve_service, get_update_service,
     get_reflect_service, get_contradiction_service, get_db_store,
     get_feedback_service, get_handoff_service, get_learner,
     get_erasure_service, get_vector_store, get_outcome_service, get_calibrator,
-    get_risk_model,
+    get_risk_model, get_tenant_id,
 )
+from apps.api.control import get_control_store
+from apps.api.idempotency import run_idempotent
+from core.schemas.memory import MemoryType
 from apps.api.schemas import (
     IngestRequest, IngestResponse, BatchIngestRequest, BatchIngestResponse,
     RetrieveRequest, RetrieveResponse, MemorySnippet,
@@ -44,29 +47,14 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
-async def ingest_memory(
-    request: IngestRequest,
-    svc=Depends(get_ingest_service),
-):
-    """Ingest a single observation into memory."""
+def _parse_types(item: IngestRequest) -> tuple[MemoryType, SourceType]:
     try:
-        from core.schemas.memory import MemoryType
-        mem_type = MemoryType(request.memory_type)
-        src_type = SourceType(request.source_type)
+        return MemoryType(item.memory_type), SourceType(item.source_type)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    memory = await svc.ingest_text(
-        text=request.text,
-        user_id=request.user_id,
-        session_id=request.session_id,
-        agent_id=request.agent_id,
-        memory_type=mem_type,
-        source_type=src_type,
-        metadata=request.metadata,
-    )
 
+def _ingest_response(memory) -> IngestResponse:
     return IngestResponse(
         memory_id=memory.memory_id,
         user_id=memory.user_id,
@@ -80,32 +68,66 @@ async def ingest_memory(
     )
 
 
+@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
+async def ingest_memory(
+    request: IngestRequest,
+    http_request: Request,
+    svc=Depends(get_ingest_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
+    """Ingest a single observation. Send ``Idempotency-Key`` to make retries safe."""
+    mem_type, src_type = _parse_types(request)
+
+    async def handler():
+        memory = await svc.ingest_text(
+            text=request.text,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            agent_id=request.agent_id,
+            memory_type=mem_type,
+            source_type=src_type,
+            metadata=request.metadata,
+        )
+        return _ingest_response(memory)
+
+    return await run_idempotent(http_request, tenant, control, handler, status_code=201)
+
+
 @router.post("/ingest/batch", response_model=BatchIngestResponse, status_code=status.HTTP_201_CREATED)
 async def ingest_batch(
     request: BatchIngestRequest,
+    http_request: Request,
     svc=Depends(get_ingest_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
 ):
-    """Batch ingest multiple observations."""
-    ingested = 0
-    failed = 0
-    memory_ids = []
+    """Batch ingest. Every item is screened with its own declared source type."""
+    if len(request.items) > 500:
+        raise HTTPException(status_code=422, detail="batch too large (max 500 items)")
+    parsed = [_parse_types(item) for item in request.items]  # validate all before writing any
 
-    for item in request.items:
-        try:
-            memory = await svc.ingest_text(
-                text=item.text,
-                user_id=item.user_id,
-                session_id=item.session_id,
-                agent_id=item.agent_id,
-                metadata=item.metadata,
-            )
-            memory_ids.append(memory.memory_id)
-            ingested += 1
-        except Exception as e:
-            logger.error(f"Batch ingest item failed: {e}")
-            failed += 1
+    async def handler():
+        ingested, failed, memory_ids = 0, 0, []
+        for item, (mem_type, src_type) in zip(request.items, parsed):
+            try:
+                memory = await svc.ingest_text(
+                    text=item.text,
+                    user_id=item.user_id,
+                    session_id=item.session_id,
+                    agent_id=item.agent_id,
+                    memory_type=mem_type,
+                    source_type=src_type,
+                    metadata=item.metadata,
+                )
+                memory_ids.append(memory.memory_id)
+                ingested += 1
+            except Exception as e:
+                logger.error(f"Batch ingest item failed: {e}")
+                failed += 1
+        return BatchIngestResponse(ingested=ingested, failed=failed, memory_ids=memory_ids)
 
-    return BatchIngestResponse(ingested=ingested, failed=failed, memory_ids=memory_ids)
+    return await run_idempotent(http_request, tenant, control, handler, status_code=201)
 
 
 # ---------------------------------------------------------------------------
@@ -409,18 +431,27 @@ async def reset_learning_state(user_id: str, learner=Depends(get_learner)):
 
 
 @router.post("/forget", response_model=ErasureReceipt, tags=["integrity"])
-async def forget(request: ForgetRequest, svc=Depends(get_erasure_service)):
+async def forget(
+    request: ForgetRequest,
+    http_request: Request,
+    svc=Depends(get_erasure_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
     """Erase memories plus prior versions, derived memories and duplicates; return a signed receipt."""
-    try:
-        return await svc.forget(
-            user_id=request.user_id,
-            memory_ids=request.memory_ids,
-            all_for_user=request.all_for_user,
-            include_duplicates=request.include_duplicates,
-            reason=request.reason,
-        )
-    except ErasureError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    async def handler():
+        try:
+            return await svc.forget(
+                user_id=request.user_id,
+                memory_ids=request.memory_ids,
+                all_for_user=request.all_for_user,
+                include_duplicates=request.include_duplicates,
+                reason=request.reason,
+            )
+        except ErasureError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    return await run_idempotent(http_request, tenant, control, handler)
 
 
 @router.get("/receipts/{receipt_id}", response_model=ErasureReceipt, tags=["integrity"])
@@ -484,19 +515,28 @@ async def reject_quarantine(memory_id: str, user_id: str, svc=Depends(get_outcom
 
 
 @router.post("/corrections", response_model=CorrectionResponse, tags=["learning"])
-async def submit_correction(request: CorrectionRequest, svc=Depends(get_outcome_service)):
+async def submit_correction(
+    request: CorrectionRequest,
+    http_request: Request,
+    svc=Depends(get_outcome_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
     """Correct a memory. ``wrong`` teaches distrust of its origin; ``outdated`` does not.
     Memories derived from it are flagged as suspect and returned."""
-    try:
-        return await svc.correct(
-            user_id=request.user_id,
-            memory_id=request.memory_id,
-            kind=request.kind,
-            corrected_text=request.corrected_text,
-            note=request.note,
-        )
-    except OutcomeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    async def handler():
+        try:
+            return await svc.correct(
+                user_id=request.user_id,
+                memory_id=request.memory_id,
+                kind=request.kind,
+                corrected_text=request.corrected_text,
+                note=request.note,
+            )
+        except OutcomeError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    return await run_idempotent(http_request, tenant, control, handler)
 
 
 @router.post("/memories/{memory_id}/confirm", tags=["learning"])

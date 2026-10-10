@@ -24,6 +24,9 @@ ERASURES = Counter(
     "aegis_erasures_total", "Erasure requests", ["tenant", "verified"], registry=REGISTRY)
 ERASED_ITEMS = Counter(
     "aegis_erased_items_total", "Items erased by relation", ["tenant", "relation"], registry=REGISTRY)
+OUTBOX_PROCESSED = Counter(
+    "aegis_outbox_ops_total", "Vector-sync outbox operations processed", ["op", "result"],
+    registry=REGISTRY)
 LEARNING_EVENTS = Counter(
     "aegis_learning_events_total", "Durable learning events appended", ["tenant", "component"],
     registry=REGISTRY)

@@ -79,3 +79,36 @@ class ApiKeyRecord(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str] = mapped_column(Text, default="")
+
+
+class IdempotencyRecord(Base):
+    """One row per (tenant, Idempotency-Key). ``status_code`` is NULL while in flight."""
+    __tablename__ = "idempotency_records"
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    route: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OutboxRecord(Base):
+    """Durable queue of vector-index operations that failed inline. Holds ids, never content."""
+    __tablename__ = "vector_outbox"
+    __table_args__ = (
+        Index("ix_outbox_due", "state", "next_attempt_at"),
+        Index("ix_outbox_memory", "tenant_id", "memory_id"),
+    )
+
+    seq: Mapped[int] = mapped_column(_SeqType, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    memory_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    op: Mapped[str] = mapped_column(String(16), nullable=False)  # upsert | status | delete
+    fields: Mapped[dict] = mapped_column(JSON, default=dict)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|done|dead|cancelled
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -39,6 +39,8 @@ async def main(argv: list[str]) -> int:
     rb = sub.add_parser("rebuild")
     rb.add_argument("--tenant", required=True)
     rb.add_argument("--component", required=True, choices=["trust", "risk"])
+    sub.add_parser("drain-outbox", help="replay queued vector-index repairs once")
+    sub.add_parser("outbox-status")
     args = ap.parse_args(argv)
 
     store = await get_control_store()
@@ -55,6 +57,14 @@ async def main(argv: list[str]) -> int:
             ok = await store.revoke_api_key(args.tenant, args.key_id)
             print("revoked" if ok else "not found or already revoked")
             return 0 if ok else 1
+        elif args.cmd == "outbox-status":
+            print(await store.outbox_counts() or "empty")
+        elif args.cmd == "drain-outbox":
+            from apps.api.dependencies import get_embedding, get_raw_db_store, get_raw_vector_store
+            from services.vector_sync import OutboxWorker
+            worker = OutboxWorker(store, await get_raw_db_store(), await get_raw_vector_store(),
+                                  get_embedding(), max_attempts=settings.outbox_max_attempts)
+            print(await worker.drain_once())
         elif args.cmd == "rebuild":
             from services.learning_runtime import LearningRuntime
             from domain.learning.risk_model import OnlineRiskModel

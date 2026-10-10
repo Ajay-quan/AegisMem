@@ -12,6 +12,7 @@ from domain.integrity.provenance import (
     base_trust, derived_from, derived_trust, get_trust, should_quarantine,
 )
 from core.observability.metrics import WRITES
+from services.vector_sync import index_payload
 from domain.memory.scoring import compute_importance_heuristic
 
 logger = logging.getLogger(__name__)
@@ -70,25 +71,18 @@ class IngestionService:
         # Save to relational store
         await self._db.save_memory(memory)
 
-        # Embed and save to vector store
+        # Embed and index. The canonical row is already saved; if indexing fails the
+        # memory is queued for repair (outbox) instead of becoming silently unretrievable.
         try:
             embedding = await self._embed.embed_single(observation.content)
             memory.content_embedding = embedding
-            await self._vs.upsert(
-                id=memory.memory_id,
-                vector=embedding,
-                payload={
-                    "user_id": memory.user_id,
-                    "namespace": memory.namespace,
-                    "memory_type": memory.memory_type,
-                    "memory_layer": memory.memory_layer,
-                    "content": memory.content[:500],
-                    "importance_score": memory.importance_score,
-                    "status": status.value,
-                },
-            )
+            await self._vs.upsert(id=memory.memory_id, vector=embedding, payload=index_payload(memory))
         except Exception as e:
-            logger.warning(f"Embedding failed for memory {memory.memory_id}: {e}")
+            logger.warning(f"Indexing failed for memory {memory.memory_id}: {e}")
+            enqueue = getattr(self._vs, "enqueue_upsert", None)
+            if enqueue is None:
+                raise
+            await enqueue(memory.memory_id)
 
         # Create graph node
         if self._graph and self._graph.is_available():

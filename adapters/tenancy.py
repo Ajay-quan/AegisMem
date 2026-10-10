@@ -130,8 +130,18 @@ class TenantScopedVectorStore:
         return r if r is not None and r.payload.get(TENANT_FIELD) == self.tenant_id else None
 
     async def delete(self, id: str) -> None:
-        if await self.get(id) is not None:
-            await self._inner.delete(id)
+        # Delegate unless the id is visibly another tenant's: deleting a not-yet-indexed id
+        # must still reach the inner store so pending index repairs are cancelled.
+        r = await self._inner.get(id)
+        if r is not None and r.payload.get(TENANT_FIELD) != self.tenant_id:
+            return
+        await self._inner.delete(id)
+
+    async def enqueue_upsert(self, id: str) -> None:
+        enqueue = getattr(self._inner, "enqueue_upsert", None)
+        if enqueue is None:
+            raise AttributeError("inner store has no repair queue")
+        await enqueue(id)
 
     async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
         if TENANT_FIELD in fields:

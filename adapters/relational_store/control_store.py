@@ -8,7 +8,10 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from sqlalchemy.exc import IntegrityError
+
 from .control_models import (
+    IdempotencyRecord, OutboxRecord,
     ApiKeyRecord, ErasureReceiptRecord, LearningEvent, LearningSnapshot, RetrievalLedgerRecord,
 )
 from .models import Base
@@ -189,3 +192,95 @@ class ControlStore:
                        ApiKeyRecord.revoked_at.is_(None))
                 .values(revoked_at=_now()))
             return res.rowcount == 1
+
+    # ------------------------------------------------------------------
+    # Idempotency
+    # ------------------------------------------------------------------
+
+    async def claim_idempotency(
+        self, tenant_id: str, key: str, route: str, request_hash: str,
+    ) -> tuple[str, IdempotencyRecord | None]:
+        """Returns ("claimed", None) | ("replay", rec) | ("conflict", rec) | ("in_flight", rec)."""
+        try:
+            async with self._sessions.begin() as s:
+                s.add(IdempotencyRecord(tenant_id=tenant_id, key=key, route=route,
+                                        request_hash=request_hash))
+            return "claimed", None
+        except IntegrityError:
+            async with self._sessions() as s:
+                rec = await s.get(IdempotencyRecord, (tenant_id, key))
+            if rec is None:  # raced with a release; let the caller retry
+                return "in_flight", None
+            if rec.request_hash != request_hash or rec.route != route:
+                return "conflict", rec
+            return ("replay", rec) if rec.status_code is not None else ("in_flight", rec)
+
+    async def complete_idempotency(
+        self, tenant_id: str, key: str, status_code: int, response: Any,
+    ) -> None:
+        async with self._sessions.begin() as s:
+            rec = await s.get(IdempotencyRecord, (tenant_id, key))
+            if rec is not None:
+                rec.status_code, rec.response = status_code, response
+
+    async def release_idempotency(self, tenant_id: str, key: str) -> None:
+        """Handler failed: free the key so the client can retry."""
+        async with self._sessions.begin() as s:
+            await s.execute(delete(IdempotencyRecord).where(
+                IdempotencyRecord.tenant_id == tenant_id, IdempotencyRecord.key == key,
+                IdempotencyRecord.status_code.is_(None)))
+
+    async def prune_idempotency(self, older_than: timedelta) -> int:
+        async with self._sessions.begin() as s:
+            res = await s.execute(delete(IdempotencyRecord)
+                                  .where(IdempotencyRecord.created_at < _now() - older_than))
+            return res.rowcount or 0
+
+    # ------------------------------------------------------------------
+    # Vector-sync outbox
+    # ------------------------------------------------------------------
+
+    async def enqueue_outbox(
+        self, tenant_id: str, memory_id: str, op: str, fields: dict[str, Any] | None = None,
+    ) -> None:
+        async with self._sessions.begin() as s:
+            s.add(OutboxRecord(tenant_id=tenant_id, memory_id=memory_id, op=op, fields=fields or {}))
+
+    async def cancel_outbox(self, tenant_id: str, memory_id: str, ops: tuple[str, ...]) -> int:
+        async with self._sessions.begin() as s:
+            res = await s.execute(
+                update(OutboxRecord)
+                .where(OutboxRecord.tenant_id == tenant_id, OutboxRecord.memory_id == memory_id,
+                       OutboxRecord.state == "pending", OutboxRecord.op.in_(ops))
+                .values(state="cancelled"))
+            return res.rowcount or 0
+
+    async def due_outbox(self, limit: int = 100) -> list[OutboxRecord]:
+        async with self._sessions() as s:
+            return list((await s.execute(
+                select(OutboxRecord)
+                .where(OutboxRecord.state == "pending", OutboxRecord.next_attempt_at <= _now())
+                .order_by(OutboxRecord.seq).limit(limit)
+            )).scalars())
+
+    async def finish_outbox(self, seq: int) -> None:
+        async with self._sessions.begin() as s:
+            await s.execute(update(OutboxRecord).where(OutboxRecord.seq == seq).values(state="done"))
+
+    async def retry_outbox(self, seq: int, error: str, max_attempts: int) -> str:
+        async with self._sessions.begin() as s:
+            rec = await s.get(OutboxRecord, seq)
+            if rec is None:
+                return "missing"
+            rec.attempts += 1
+            rec.last_error = error[:2000]
+            if rec.attempts >= max_attempts:
+                rec.state = "dead"
+            else:
+                rec.next_attempt_at = _now() + timedelta(seconds=min(3600, 2 ** rec.attempts))
+            return rec.state
+
+    async def outbox_counts(self) -> dict[str, int]:
+        async with self._sessions() as s:
+            rows = await s.execute(select(OutboxRecord.state, func.count()).group_by(OutboxRecord.state))
+            return {state: int(n) for state, n in rows.all()}
