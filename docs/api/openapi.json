@@ -1,0 +1,2979 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AegisMem - the trust layer for agent memory",
+    "description": "Production-grade persistent memory system for long-running LLM agents. Supports multi-store hybrid retrieval, versioned updates, contradiction detection, and higher-level reflection generation.",
+    "version": "0.4.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Ready",
+        "description": "Readiness: every durable dependency answers. Kubernetes should gate traffic on this.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Ingest Memory",
+        "description": "Ingest a single observation. Send ``Idempotency-Key`` to make retries safe.",
+        "operationId": "ingest_memory_api_v1_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/batch": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Ingest Batch",
+        "description": "Batch ingest. Every item is screened with its own declared source type.",
+        "operationId": "ingest_batch_api_v1_ingest_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchIngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrieve": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Retrieve Memories",
+        "description": "Retrieve memories using hybrid semantic + symbolic search.",
+        "operationId": "retrieve_memories_api_v1_retrieve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrieveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrieveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memories/{memory_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Memory",
+        "description": "Get a single memory by ID.",
+        "operationId": "get_memory_api_v1_memories__memory_id__get",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memory",
+        "description": "Soft-delete a memory.",
+        "operationId": "delete_memory_api_v1_memories__memory_id__delete",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memories/list": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "List Memories",
+        "description": "List memories for a user.",
+        "operationId": "list_memories_api_v1_memories_list_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListMemoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryDetailResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Memories Api V1 Memories List Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/update": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Update Memory",
+        "description": "Smart update: creates, updates, merges, or supersedes based on LLM decision.",
+        "operationId": "update_memory_api_v1_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reflect": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Generate Reflections",
+        "description": "Generate higher-level reflections from stored memories.",
+        "operationId": "generate_reflections_api_v1_reflect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReflectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/contradictions/scan": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Scan Contradictions",
+        "description": "Scan a memory for contradictions with existing memories.",
+        "operationId": "scan_contradictions_api_v1_contradictions_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContradictionScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContradictionScanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/contradictions": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "List Contradictions",
+        "description": "List all detected contradictions.",
+        "operationId": "list_contradictions_api_v1_contradictions_get",
+        "parameters": [
+          {
+            "name": "resolved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Resolved"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContradictionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/handoff": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Build Handoff",
+        "description": "Build a token-budgeted, cited context packet for a new agent, model or session.",
+        "operationId": "build_handoff_api_v1_handoff_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffPacket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feedback": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Submit Feedback",
+        "description": "Report which memories from a retrieval were used. Trains per-user ranking weights.",
+        "operationId": "submit_feedback_api_v1_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/learning/{user_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Learning State",
+        "description": "Inspect what the system has learned about ranking for this user.",
+        "operationId": "get_learning_state_api_v1_learning__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningStateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Reset Learning State",
+        "description": "Discard learned ranking weights for this user (reverts to defaults).",
+        "operationId": "reset_learning_state_api_v1_learning__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/forget": {
+      "post": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "Forget",
+        "description": "Erase memories plus prior versions, derived memories and duplicates; return a signed receipt.",
+        "operationId": "forget_api_v1_forget_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipts/{receipt_id}": {
+      "get": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "Get Receipt",
+        "operationId": "get_receipt_api_v1_receipts__receipt_id__get",
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Receipt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receipts/verify": {
+      "post": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "Verify Receipt",
+        "description": "Check that a receipt was issued by this deployment and has not been altered.",
+        "operationId": "verify_receipt_api_v1_receipts_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ErasureReceipt"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptVerifyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quarantine/{user_id}": {
+      "get": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "List Quarantine",
+        "description": "Memories held back at ingest (low-trust, instruction-like). Never served until released.",
+        "operationId": "list_quarantine_api_v1_quarantine__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quarantine/{memory_id}/release": {
+      "post": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "Release Quarantine",
+        "description": "Approve held content after review. It becomes retrievable, and its origin earns trust.",
+        "operationId": "release_quarantine_api_v1_quarantine__memory_id__release_post",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quarantine/{memory_id}/reject": {
+      "post": {
+        "tags": [
+          "memory",
+          "integrity"
+        ],
+        "summary": "Reject Quarantine",
+        "description": "Reject held content. Its origin loses trust deployment-wide, and the content is erased with a receipt.",
+        "operationId": "reject_quarantine_api_v1_quarantine__memory_id__reject_post",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corrections": {
+      "post": {
+        "tags": [
+          "memory",
+          "learning"
+        ],
+        "summary": "Submit Correction",
+        "description": "Correct a memory. ``wrong`` teaches distrust of its origin; ``outdated`` does not.\nMemories derived from it are flagged as suspect and returned.",
+        "operationId": "submit_correction_api_v1_corrections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memories/{memory_id}/confirm": {
+      "post": {
+        "tags": [
+          "memory",
+          "learning"
+        ],
+        "summary": "Confirm Memory",
+        "description": "User or reviewer confirms a memory is correct; its origin earns trust.",
+        "operationId": "confirm_memory_api_v1_memories__memory_id__confirm_post",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trust/sources": {
+      "get": {
+        "tags": [
+          "memory",
+          "learning"
+        ],
+        "summary": "Trust Sources",
+        "description": "Learned reliability of every source/origin, least trusted first.",
+        "operationId": "trust_sources_api_v1_trust_sources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustSourcesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk-model": {
+      "get": {
+        "tags": [
+          "memory",
+          "learning"
+        ],
+        "summary": "Risk Model Stats",
+        "description": "How the write-risk model has adapted: reviewed holds, precision, live thresholds, top risk signals.",
+        "operationId": "risk_model_stats_api_v1_risk_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Memory Stats",
+        "description": "Aggregate statistics for one user's memories (tenant-scoped): counts by type and\nstatus, importance, access totals and unresolved contradictions.",
+        "operationId": "memory_stats_api_v1_stats_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/keys": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Keys",
+        "operationId": "list_keys_api_v1_admin_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Keys Api V1 Admin Keys Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Key",
+        "operationId": "create_key_api_v1_admin_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedKey"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/keys/{key_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Revoke Key",
+        "operationId": "revoke_key_api_v1_admin_keys__key_id__delete",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/audit": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Audit Trail",
+        "description": "Most recent mutating API calls for the caller's tenant (who did what, when).",
+        "operationId": "audit_trail_api_v1_admin_audit_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntry"
+                  },
+                  "title": "Response Audit Trail Api V1 Admin Audit Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/run": {
+      "post": {
+        "tags": [
+          "evaluation",
+          "evaluation"
+        ],
+        "summary": "Run Evaluation",
+        "description": "Run the full evaluation suite.",
+        "operationId": "run_evaluation_api_v1_eval_run_post",
+        "parameters": [
+          {
+            "name": "user_id_prefix",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "eval",
+              "title": "User Id Prefix"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/retrieval": {
+      "post": {
+        "tags": [
+          "evaluation",
+          "evaluation"
+        ],
+        "summary": "Run Retrieval Eval",
+        "description": "Run retrieval-only evaluation.",
+        "operationId": "run_retrieval_eval_api_v1_eval_retrieval_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "eval_retrieval",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 5,
+              "title": "K"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/contradiction": {
+      "post": {
+        "tags": [
+          "evaluation",
+          "evaluation"
+        ],
+        "summary": "Run Contradiction Eval",
+        "description": "Run contradiction detection evaluation.",
+        "operationId": "run_contradiction_eval_api_v1_eval_contradiction_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "eval_contradiction",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyInfo": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "name",
+          "key_prefix",
+          "scopes",
+          "created_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "title": "ApiKeyInfo"
+      },
+      "AuditEntry": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "principal": {
+            "type": "string",
+            "title": "Principal"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "route": {
+            "type": "string",
+            "title": "Route"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "key_id",
+          "principal",
+          "method",
+          "route",
+          "status",
+          "created_at"
+        ],
+        "title": "AuditEntry"
+      },
+      "BatchIngestRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IngestRequest"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "BatchIngestRequest"
+      },
+      "BatchIngestResponse": {
+        "properties": {
+          "ingested": {
+            "type": "integer",
+            "title": "Ingested"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "memory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Memory Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingested",
+          "failed",
+          "memory_ids"
+        ],
+        "title": "BatchIngestResponse"
+      },
+      "ContradictionListResponse": {
+        "properties": {
+          "contradictions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Contradictions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contradictions",
+          "total"
+        ],
+        "title": "ContradictionListResponse"
+      },
+      "ContradictionScanRequest": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "user_id"
+        ],
+        "title": "ContradictionScanRequest"
+      },
+      "ContradictionScanResponse": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "contradictions_found": {
+            "type": "integer",
+            "title": "Contradictions Found"
+          },
+          "reports": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Reports"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "contradictions_found",
+          "reports"
+        ],
+        "title": "ContradictionScanResponse"
+      },
+      "CorrectionRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "'wrong' (never true; penalises its origin), 'outdated' (changed; no penalty), 'malicious' (attack that slipped through; trains the risk model and erases it with derivatives)"
+          },
+          "corrected_text": {
+            "type": "string",
+            "title": "Corrected Text",
+            "description": "The right information, stored as the replacement",
+            "default": ""
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "memory_id",
+          "kind"
+        ],
+        "title": "CorrectionRequest"
+      },
+      "CorrectionResponse": {
+        "properties": {
+          "corrected_memory_id": {
+            "type": "string",
+            "title": "Corrected Memory Id"
+          },
+          "replacement_memory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement Memory Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "source_trust_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Trust After"
+          },
+          "flagged_derived": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Flagged Derived"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "corrected_memory_id",
+          "replacement_memory_id",
+          "kind",
+          "source_trust_after",
+          "flagged_derived"
+        ],
+        "title": "CorrectionResponse"
+      },
+      "CreateKeyRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Scopes",
+            "description": "Subset of ['memory:read', 'memory:write', 'review', 'privacy', 'admin']"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "CreateKeyRequest"
+      },
+      "CreatedKey": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key",
+            "description": "Shown once. Store it in a secret manager."
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "name",
+          "key_prefix",
+          "scopes",
+          "created_at",
+          "last_used_at",
+          "revoked_at",
+          "api_key"
+        ],
+        "title": "CreatedKey"
+      },
+      "ErasureReceipt": {
+        "properties": {
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Body"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "alg": {
+            "type": "string",
+            "title": "Alg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body",
+          "signature",
+          "alg"
+        ],
+        "title": "ErasureReceipt"
+      },
+      "FeedbackRequest": {
+        "properties": {
+          "retrieval_id": {
+            "type": "string",
+            "title": "Retrieval Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "used_memory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Used Memory Ids",
+            "description": "Memories from this retrieval the agent actually used; the rest count as unused"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retrieval_id",
+          "user_id"
+        ],
+        "title": "FeedbackRequest"
+      },
+      "FeedbackResponse": {
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "title": "Accepted"
+          },
+          "used": {
+            "type": "integer",
+            "title": "Used"
+          },
+          "learning_active": {
+            "type": "boolean",
+            "title": "Learning Active"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Weights"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted",
+          "used",
+          "learning_active",
+          "weights"
+        ],
+        "title": "FeedbackResponse"
+      },
+      "ForgetRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "memory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Memory Ids"
+          },
+          "all_for_user": {
+            "type": "boolean",
+            "title": "All For User",
+            "default": false
+          },
+          "include_duplicates": {
+            "type": "boolean",
+            "title": "Include Duplicates",
+            "default": true
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "e.g. 'GDPR Art.17 request #123'",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "ForgetRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HandoffItem": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type"
+          },
+          "importance": {
+            "type": "number",
+            "title": "Importance"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "conflicts_with": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Conflicts With"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "text",
+          "memory_type",
+          "importance",
+          "updated_at"
+        ],
+        "title": "HandoffItem"
+      },
+      "HandoffPacket": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "task": {
+            "type": "string",
+            "title": "Task",
+            "default": ""
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "token_budget": {
+            "type": "integer",
+            "title": "Token Budget"
+          },
+          "tokens_used": {
+            "type": "integer",
+            "title": "Tokens Used",
+            "default": 0
+          },
+          "sections": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/HandoffItem"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Sections"
+          },
+          "omitted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Omitted"
+          },
+          "markdown": {
+            "type": "string",
+            "title": "Markdown",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "token_budget"
+        ],
+        "title": "HandoffPacket"
+      },
+      "HandoffRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "task": {
+            "type": "string",
+            "title": "Task",
+            "description": "What the receiving agent is about to do",
+            "default": ""
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "Only show changes/activity after this time"
+          },
+          "token_budget": {
+            "type": "integer",
+            "maximum": 32000.0,
+            "minimum": 100.0,
+            "title": "Token Budget",
+            "default": 1500
+          },
+          "max_per_section": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Max Per Section",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "HandoffRequest"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Components"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "components"
+        ],
+        "title": "HealthResponse"
+      },
+      "IngestRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "default": ""
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "default": ""
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type",
+            "default": "observation"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "default": "user_message"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "user_id"
+        ],
+        "title": "IngestRequest"
+      },
+      "IngestResponse": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type"
+          },
+          "importance_score": {
+            "type": "number",
+            "title": "Importance Score"
+          },
+          "content_preview": {
+            "type": "string",
+            "title": "Content Preview"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'active', or 'pending' if quarantined for review",
+            "default": "active"
+          },
+          "quarantine_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quarantine Reason"
+          },
+          "trust": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "user_id",
+          "memory_type",
+          "importance_score",
+          "content_preview",
+          "created_at"
+        ],
+        "title": "IngestResponse"
+      },
+      "LearningStateResponse": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "learning_active": {
+            "type": "boolean",
+            "title": "Learning Active"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "positives": {
+            "type": "integer",
+            "title": "Positives"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Weights"
+          },
+          "default_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Default Weights"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "learning_active",
+          "events",
+          "positives",
+          "weights",
+          "default_weights"
+        ],
+        "title": "LearningStateResponse"
+      },
+      "ListMemoriesRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "active"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "ListMemoriesRequest"
+      },
+      "MemoryDetailResponse": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "importance_score": {
+            "type": "number",
+            "title": "Importance Score"
+          },
+          "recency_score": {
+            "type": "number",
+            "title": "Recency Score"
+          },
+          "confidence_score": {
+            "type": "number",
+            "title": "Confidence Score"
+          },
+          "access_count": {
+            "type": "integer",
+            "title": "Access Count"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "contradiction_status": {
+            "type": "string",
+            "title": "Contradiction Status"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "namespace",
+          "user_id",
+          "agent_id",
+          "memory_type",
+          "content",
+          "source_type",
+          "created_at",
+          "updated_at",
+          "importance_score",
+          "recency_score",
+          "confidence_score",
+          "access_count",
+          "version",
+          "status",
+          "contradiction_status",
+          "tags",
+          "metadata"
+        ],
+        "title": "MemoryDetailResponse"
+      },
+      "MemorySnippet": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type"
+          },
+          "importance_score": {
+            "type": "number",
+            "title": "Importance Score"
+          },
+          "semantic_score": {
+            "type": "number",
+            "title": "Semantic Score"
+          },
+          "composite_score": {
+            "type": "number",
+            "title": "Composite Score"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "content",
+          "memory_type",
+          "importance_score",
+          "semantic_score",
+          "composite_score",
+          "rank",
+          "created_at"
+        ],
+        "title": "MemorySnippet"
+      },
+      "QuarantineItem": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "trust": {
+            "type": "number",
+            "title": "Trust"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "content",
+          "reason",
+          "trust",
+          "source",
+          "created_at"
+        ],
+        "title": "QuarantineItem"
+      },
+      "QuarantineListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantineItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "QuarantineListResponse"
+      },
+      "ReceiptVerifyResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "ReceiptVerifyResponse"
+      },
+      "ReflectRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "default": ""
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "ReflectRequest"
+      },
+      "ReflectResponse": {
+        "properties": {
+          "reflections_generated": {
+            "type": "integer",
+            "title": "Reflections Generated"
+          },
+          "reflections": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Reflections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reflections_generated",
+          "reflections"
+        ],
+        "title": "ReflectResponse"
+      },
+      "RetrieveRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Query"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "default": ""
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "default": 5
+          },
+          "min_importance": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Importance",
+            "default": 0.0
+          },
+          "memory_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Memory Types"
+          },
+          "time_range_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Range Start"
+          },
+          "time_range_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Range End"
+          },
+          "include_archived": {
+            "type": "boolean",
+            "title": "Include Archived",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "user_id"
+        ],
+        "title": "RetrieveRequest"
+      },
+      "RetrieveResponse": {
+        "properties": {
+          "retrieval_id": {
+            "type": "string",
+            "title": "Retrieval Id",
+            "default": ""
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/MemorySnippet"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total_found": {
+            "type": "integer",
+            "title": "Total Found"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          },
+          "context_window": {
+            "type": "string",
+            "title": "Context Window",
+            "default": ""
+          },
+          "guard_report": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Guard Report"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "results",
+          "total_found",
+          "latency_ms"
+        ],
+        "title": "RetrieveResponse"
+      },
+      "StatsResponse": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "total_memories": {
+            "type": "integer",
+            "title": "Total Memories"
+          },
+          "namespaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Namespaces"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Type"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "avg_importance": {
+            "type": "number",
+            "title": "Avg Importance",
+            "default": 0.0
+          },
+          "total_access_count": {
+            "type": "integer",
+            "title": "Total Access Count",
+            "default": 0
+          },
+          "unresolved_contradictions": {
+            "type": "integer",
+            "title": "Unresolved Contradictions",
+            "default": 0
+          },
+          "last_memory_at": {
+            "type": "string",
+            "title": "Last Memory At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "total_memories",
+          "namespaces"
+        ],
+        "title": "StatsResponse"
+      },
+      "TrustSource": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "trust": {
+            "type": "number",
+            "title": "Trust"
+          },
+          "default_trust": {
+            "type": "number",
+            "title": "Default Trust"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "origin",
+          "trust",
+          "default_trust",
+          "events",
+          "updated_at"
+        ],
+        "title": "TrustSource"
+      },
+      "TrustSourcesResponse": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/TrustSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "guard_min_trust": {
+            "type": "number",
+            "title": "Guard Min Trust"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources",
+          "guard_min_trust"
+        ],
+        "title": "TrustSourcesResponse"
+      },
+      "UpdateRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "new_content": {
+            "type": "string",
+            "title": "New Content"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": ""
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "new_content"
+        ],
+        "title": "UpdateRequest"
+      },
+      "UpdateResponse": {
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "title": "Memory Id"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "previous_memory_id": {
+            "type": "string",
+            "title": "Previous Memory Id"
+          },
+          "content_preview": {
+            "type": "string",
+            "title": "Content Preview"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memory_id",
+          "action",
+          "reason",
+          "previous_memory_id",
+          "content_preview"
+        ],
+        "title": "UpdateResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

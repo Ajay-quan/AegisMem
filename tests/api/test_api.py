@@ -64,7 +64,9 @@ class TestHealthEndpoint:
     async def test_root_returns_info(self, test_client):
         resp = await test_client.get("/")
         assert resp.status_code == 200
-        assert "AegisMem" in resp.json()["name"]
+        body = resp.json()
+        assert body["name"] == "AegisMem"
+        assert body["engine"] == "aegismem"  # package / engine identifier
 
 
 class TestIngestEndpoint:

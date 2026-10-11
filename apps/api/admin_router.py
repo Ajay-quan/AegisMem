@@ -68,3 +68,24 @@ async def revoke_key(
         raise HTTPException(status.HTTP_409_CONFLICT, "cannot revoke the key making this request")
     if not await store.revoke_api_key(principal.tenant_id, key_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "key not found")
+
+
+class AuditEntry(BaseModel):
+    seq: int
+    key_id: str
+    principal: str
+    method: str
+    route: str
+    status: int
+    created_at: datetime
+
+
+@admin_router.get("/audit", response_model=list[AuditEntry])
+async def audit_trail(
+    principal: Annotated[Principal, Depends(authorize)],
+    store: Annotated[ControlStore, Depends(get_control_store)],
+    limit: int = 100,
+):
+    """Most recent mutating API calls for the caller's tenant (who did what, when)."""
+    rows = await store.list_audit(principal.tenant_id, limit=min(max(limit, 1), 1000))
+    return [{k: getattr(r, k) for k in AuditEntry.model_fields} for r in rows]

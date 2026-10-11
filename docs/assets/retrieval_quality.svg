@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="320" viewBox="0 0 720 320">
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="30" y="38" font-size="22" font-family="Arial" font-weight="700">AegisMem Retrieval Quality</text>
+  <line x1="80" y1="250" x2="650" y2="250" stroke="#333"/>
+  <line x1="80" y1="70" x2="80" y2="250" stroke="#333"/>
+  <rect x="80" y="70.0" width="95" height="180.0" fill="#3563e9"/><rect x="220" y="160.0" width="95" height="90.0" fill="#3563e9"/><rect x="360" y="76.0" width="95" height="174.0" fill="#3563e9"/><rect x="500" y="70.0" width="95" height="180.0" fill="#3563e9"/>
+  <text x="127.5" y="274" text-anchor="middle" font-size="14">P@1</text><text x="127.5" y="62.0" text-anchor="middle" font-size="13">1.00</text><text x="267.5" y="274" text-anchor="middle" font-size="14">P@3</text><text x="267.5" y="152.0" text-anchor="middle" font-size="13">0.50</text><text x="407.5" y="274" text-anchor="middle" font-size="14">R@5</text><text x="407.5" y="68.0" text-anchor="middle" font-size="13">0.97</text><text x="547.5" y="274" text-anchor="middle" font-size="14">MRR</text><text x="547.5" y="62.0" text-anchor="middle" font-size="13">1.00</text>
+</svg>

@@ -26,7 +26,7 @@ from apps.api.schemas import (
     HandoffRequest, FeedbackRequest, FeedbackResponse, LearningStateResponse,
     ForgetRequest, ErasureReceipt, ReceiptVerifyResponse,
     QuarantineItem, QuarantineListResponse,
-    CorrectionRequest, CorrectionResponse, TrustSourcesResponse,
+    CorrectionRequest, CorrectionResponse, TrustSourcesResponse, StatsResponse,
 )
 from core.config.settings import settings
 from services.outcome_service import OutcomeError
@@ -559,3 +559,41 @@ async def trust_sources(calibrator=Depends(get_calibrator)):
 async def risk_model_stats(model=Depends(get_risk_model)):
     """How the write-risk model has adapted: reviewed holds, precision, live thresholds, top risk signals."""
     return model.stats()
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def memory_stats(user_id: str, namespace: str = "", db=Depends(get_db_store)):
+    """Aggregate statistics for one user's memories (tenant-scoped): counts by type and
+    status, importance, access totals and unresolved contradictions."""
+    memories = await db.list_memories(user_id=user_id, namespace=namespace, status="", limit=10_000)
+    by_type: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    namespaces: set[str] = set()
+    total_access, importance_sum, last_at = 0, 0.0, ""
+    for m in memories:
+        mtype = m.memory_type if isinstance(m.memory_type, str) else m.memory_type.value
+        mstatus = m.status if isinstance(m.status, str) else m.status.value
+        by_type[mtype] = by_type.get(mtype, 0) + 1
+        by_status[mstatus] = by_status.get(mstatus, 0) + 1
+        namespaces.add(m.namespace)
+        total_access += m.access_count
+        importance_sum += m.importance_score
+        last_at = max(last_at, m.created_at.isoformat())
+    ids = {m.memory_id for m in memories}
+    try:
+        contradictions = [c for c in await db.list_contradictions(resolved=False)
+                          if c.get("memory_a_id") in ids or c.get("memory_b_id") in ids]
+    except Exception:
+        contradictions = []
+    return StatsResponse(
+        user_id=user_id, total_memories=len(memories), namespaces=sorted(n for n in namespaces if n),
+        by_type=by_type, by_status=by_status,
+        avg_importance=round(importance_sum / len(memories), 4) if memories else 0.0,
+        total_access_count=total_access, unresolved_contradictions=len(contradictions),
+        last_memory_at=last_at,
+    )

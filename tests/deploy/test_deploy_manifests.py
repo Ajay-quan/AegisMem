@@ -75,3 +75,14 @@ def test_helm_chart_renders_hardened_and_hook_safe():
         spec = docs[kind]["spec"]["template"]["spec"]
         assert spec["enableServiceLinks"] is False
         assert spec["containers"][0]["securityContext"]["readOnlyRootFilesystem"] is True
+
+
+
+def test_deployments_declare_every_store_backend(k8s):
+    """Dev defaults are in-memory; every deployment must name real backends explicitly."""
+    compose = yaml.safe_load((ROOT / "infra/compose/docker-compose.yml").read_text())["x-api-env"]
+    helm = yaml.safe_load((ROOT / "infra/helm/aegismem/values.yaml").read_text())["config"]
+    for cfg in (k8s["ConfigMap"]["data"], compose, helm):
+        assert cfg["MEMORY_BACKEND"] == "postgres"
+        assert cfg["VECTOR_BACKEND"] in ("pgvector", "qdrant")
+        assert cfg["GRAPH_BACKEND"] in ("none", "neo4j")

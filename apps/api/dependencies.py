@@ -106,8 +106,17 @@ async def get_raw_db_store() -> PostgresStore:
         logger.warning("Using in-memory memory store: nothing persists across restarts")
         _db_store = InMemoryMemoryStore()  # type: ignore
     if _db_store is None:
-        _db_store = PostgresStore(settings.postgres_url)
-        await _db_store.initialize()
+        store = PostgresStore(settings.postgres_url)
+        try:
+            await store.initialize()
+        except Exception as e:
+            if settings.is_production_like:
+                raise RuntimeError(f"Postgres unavailable in {settings.app_env}: {e}") from e
+            from adapters.relational_store.memory_store import InMemoryMemoryStore
+            logger.warning(f"Postgres unavailable ({e}); DEVELOPMENT fallback to in-memory store")
+            _db_store = InMemoryMemoryStore()  # type: ignore
+            return _db_store
+        _db_store = store
     return _db_store
 
 
@@ -153,6 +162,10 @@ async def get_graph_store() -> MockGraphStore:
     global _graph_store
     if _graph_store is None and settings.graph_backend == "none":
         _graph_store = NullGraphStore()  # type: ignore
+    if _graph_store is None and settings.graph_backend == "memory":
+        if settings.is_production_like:
+            raise RuntimeError("graph_backend=memory is not allowed in staging/production")
+        _graph_store = MockGraphStore()
     if _graph_store is None:
         try:
             from adapters.graph_store.neo4j_store import GraphStore as Neo4jStore

@@ -40,12 +40,20 @@ async def test_request_and_pipeline_spans(client):
 
     spans = EXPORTER.get_finished_spans()
     names = {s.name for s in spans}
-    assert {"POST /api/v1/ingest", "POST /api/v1/retrieve", "aegis.retrieve", "aegis.erasure"} <= names
-    ingest = next(s for s in spans if s.name == "POST /api/v1/ingest")
+    assert {"POST /api/v1/ingest", "POST /api/v1/retrieve", "aegis.ingest", "aegis.retrieve",
+            "aegis.erasure"} <= names
+    ingest = next(s for s in spans if s.name == "aegis.ingest")
     assert ingest.attributes["aegis.write.outcome"] == "stored"
+    http_ingest = next(s for s in spans if s.name == "POST /api/v1/ingest")
+    assert ingest.context.trace_id == http_ingest.context.trace_id  # same trace as the request
     retrieve = next(s for s in spans if s.name == "aegis.retrieve")
     http_retrieve = next(s for s in spans if s.name == "POST /api/v1/retrieve")
-    assert retrieve.parent.span_id == http_retrieve.context.span_id  # nested under the request
+    by_id = {s.context.span_id: s for s in spans}
+    ancestors, node = [], retrieve
+    while node.parent is not None and node.parent.span_id in by_id:
+        node = by_id[node.parent.span_id]
+        ancestors.append(node.context.span_id)
+    assert http_retrieve.context.span_id in ancestors  # nested under the request span
 
     dump = json.dumps([dict(s.attributes) for s in spans])
     assert "hypothyroidism" not in dump and "u-42" not in dump

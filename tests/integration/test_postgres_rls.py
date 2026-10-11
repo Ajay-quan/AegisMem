@@ -29,6 +29,8 @@ async def db():
     admin = PostgresStore(PG_URL)
     async with admin._engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        from adapters.relational_store.pg_utils import ensure_pgvector
+        await ensure_pgvector(conn)
         await conn.run_sync(Base.metadata.create_all)
         await conn.exec_driver_sql(f"DROP ROLE IF EXISTS {APP_ROLE}")
         await conn.exec_driver_sql(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PW}' NOSUPERUSER NOBYPASSRLS")

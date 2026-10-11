@@ -11,6 +11,7 @@ from sqlalchemy import select, update, and_, func, delete, or_
 
 from core.exceptions import MemoryNotFoundError, MemoryStorageError
 from core.tenancy_context import apply_rls
+from .pg_utils import ensure_pgvector
 from core.schemas.memory import MemoryItem, MemoryStatus, FactRecord as SchemaFact
 from .models import (
     Base, MemoryRecord, FactRecord as DBFact, ReflectionRecord,
@@ -46,6 +47,7 @@ class PostgresStore:
     async def initialize(self) -> None:
         """Create all tables."""
         async with self._engine.begin() as conn:
+            await ensure_pgvector(conn)
             await conn.run_sync(Base.metadata.create_all)
         logger.info("PostgreSQL schema initialized")
 

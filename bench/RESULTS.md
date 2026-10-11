@@ -4,6 +4,19 @@ Recorded 2026-10-10 on commit series `q1/production-core`. Reproduce with the co
 
 ## Recall impact: LoCoMo (real embeddings)
 
+**Current (v0.4.0, hybrid dense + BM25 with RRF → guard → ranking):** recall@5 **0.565** vs 0.514 raw dense
+(+5.1 pts), recall@10 **0.665** vs 0.617 (+4.8), hit@5 0.632 vs 0.583; 0 / 5,882 benign turns quarantined.
+
+| Hybrid variant (full dataset) | recall@5 | recall@10 |
+|---|---|---|
+| dense only (v0.3 Q1 line) | 0.521 | 0.620 |
+| BM25 pool 200, blend 0.3 (pre-merge main defaults) | 0.418 | 0.606 |
+| pool 2,000, blend 0.5 | 0.531 | 0.639 |
+| pool 2,000, blend 0.3 | 0.549 | 0.649 |
+| **pool 2,000, blend 0.15 (default)** | **0.565** | **0.665** |
+
+Earlier (dense only):
+
 `AEGIS_BENCH_EMBED_URL=http://localhost:11434/v1 AEGIS_BENCH_EMBED_MODEL=nomic-embed-text AEGIS_BENCH_EMBED_DIM=768 python -m bench.locomo`
 
 10 conversations, 5,882 turns ingested through the full pipeline, 1,536 questions with gold evidence (categories 1–4).

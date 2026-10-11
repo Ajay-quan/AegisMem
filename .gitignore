@@ -31,3 +31,7 @@ dist/
 
 # Local dev data
 .aegis/
+
+# Build output
+build/
+.next/

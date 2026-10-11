@@ -1,5 +1,6 @@
 """AegisMem core configuration using pydantic-settings."""
 from functools import lru_cache
+import os
 from typing import Literal
 
 from pydantic import Field
@@ -8,7 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # AEGIS_ENV_FILE selects the dotenv file; empty disables it (the test suite does this so
+        # a developer's personal .env can never change test behaviour).
+        env_file=os.environ.get("AEGIS_ENV_FILE", ".env") or None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -48,6 +51,31 @@ class Settings(BaseSettings):
     default_tenant: str = "default"
     # Refuse to boot in staging/production if Postgres RLS cannot be enforced for the app role.
     require_rls: bool = True
+
+    # HTTP hardening
+    max_request_bytes: int = 1_048_576
+
+    # Hybrid retrieval (dense + BM25 fused with Reciprocal Rank Fusion)
+    hybrid_retrieval_enabled: bool = True
+    # BM25 corpus size per user. LoCoMo: a 200 cap lost 10 pts recall@5 on long histories.
+    # Built per query (O(n)); a database full-text index replaces this for very large users (Q2).
+    lexical_candidate_pool: int = 2000
+    rrf_k: int = 60
+    bm25_k1: float = 1.5
+    bm25_b: float = 0.75
+    # Relevance fed to ranking = (1 - w) * dense cosine + w * normalized BM25. Tuned on LoCoMo
+    # (bench/RESULTS.md): 0.15 -> recall@5 0.565 vs 0.514 raw dense; 0.3 -> 0.549; 0.5 -> 0.531.
+    hybrid_lexical_weight: float = 0.15
+
+    # Reranking
+    reranker_type: Literal["heuristic", "cross_encoder"] = "heuristic"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # PII redaction at ingest (emails, phones, cards with Luhn, SSNs, IPs, provider secrets)
+    pii_redaction_enabled: bool = False
+
+    # Experimental EWC ranking policy (domain/learning/online_scorer.py), evaluation only.
+    continual_learning_enabled: bool = False
 
     # Observability
     metrics_enabled: bool = True
@@ -91,10 +119,29 @@ class Settings(BaseSettings):
 
     # Qdrant
     # Storage topology. "pgvector" + graph "none" = single-store mode (one Postgres).
-    vector_backend: Literal["qdrant", "pgvector", "memory"] = "qdrant"
+    # Zero-infra defaults for development; staging/production must configure real stores
+    # (validate_runtime_config refuses in-memory backends there).
+    vector_backend: Literal["qdrant", "pgvector", "memory"] = "memory"
     # "memory" = Docker-free local development (nothing persists). Rejected outside development.
-    memory_backend: Literal["postgres", "memory"] = "postgres"
-    graph_backend: Literal["neo4j", "none"] = "neo4j"
+    memory_backend: Literal["postgres", "memory"] = "memory"
+    graph_backend: Literal["neo4j", "memory", "none"] = "memory"
+
+    # Names used on the pre-merge main branch.
+    @property
+    def relational_store(self) -> str:
+        return self.memory_backend
+
+    @property
+    def vector_store(self) -> str:
+        return self.vector_backend
+
+    @property
+    def graph_store(self) -> str:
+        return self.graph_backend
+
+    @property
+    def strict_stores(self) -> bool:
+        return self.is_production_like
 
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333

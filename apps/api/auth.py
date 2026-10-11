@@ -32,6 +32,7 @@ from apps.api.control import get_control_store
 from core.config.settings import settings
 from core.observability.metrics import AUTH_FAILURES, RATE_LIMITED
 from apps.api.ratelimit import get_limiter, limits_for
+from apps.api.routing import route_template
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,8 @@ ROUTE_SCOPES: dict[tuple[str, str], str] = {
     ("POST", "/memories/{memory_id}/confirm"): "memory:write",
     ("GET", "/trust/sources"): "memory:read",
     ("GET", "/risk-model"): "memory:read",
+    ("GET", "/stats"): "memory:read",
+    ("GET", "/admin/audit"): "admin",
     ("POST", "/admin/keys"): "admin",
     ("GET", "/admin/keys"): "admin",
     ("DELETE", "/admin/keys/{key_id}"): "admin",
@@ -144,8 +147,7 @@ async def get_principal(
 async def authorize(
     request: Request, principal: Annotated[Principal, Depends(get_principal)],
 ) -> Principal:
-    route = request.scope.get("route")
-    path = getattr(route, "path", request.url.path)
+    path = route_template(request) or request.url.path
     rel = path[len(API_PREFIX):] if path.startswith(API_PREFIX) else path
     scope = ROUTE_SCOPES.get((request.method, rel))
     if scope is None:

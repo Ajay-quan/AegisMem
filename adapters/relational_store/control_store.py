@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.exc import IntegrityError
 
 from .control_models import (
-    IdempotencyRecord, OutboxRecord,
+    AuditEvent, IdempotencyRecord, OutboxRecord,
     ApiKeyRecord, ErasureReceiptRecord, LearningEvent, LearningSnapshot, RetrievalLedgerRecord,
 )
 from .models import Base
+from .pg_utils import ensure_pgvector
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class ControlStore:
     async def create_schema(self) -> None:
         """Dev/test only. Production schema is managed by Alembic migrations."""
         async with self._engine.begin() as conn:
+            await ensure_pgvector(conn)
             await conn.run_sync(Base.metadata.create_all)
 
     async def ping(self) -> None:
@@ -304,3 +306,20 @@ class ControlStore:
         async with self._sessions() as s:
             rows = await s.execute(select(OutboxRecord.state, func.count()).group_by(OutboxRecord.state))
             return {state: int(n) for state, n in rows.all()}
+
+    # ------------------------------------------------------------------
+    # Audit trail
+    # ------------------------------------------------------------------
+
+    async def record_audit(self, tenant_id: str, key_id: str, principal: str, method: str,
+                           route: str, status: int) -> None:
+        async with self._sessions.begin() as s:
+            s.add(AuditEvent(tenant_id=tenant_id, key_id=key_id, principal=principal,
+                             method=method, route=route, status=status))
+
+    async def list_audit(self, tenant_id: str, limit: int = 100) -> list[AuditEvent]:
+        async with self._sessions() as s:
+            return list((await s.execute(
+                select(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
+                .order_by(AuditEvent.seq.desc()).limit(limit)
+            )).scalars())

@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-06-30T01:44:28.845724+00:00",
+  "config": {
+    "tasks": 4,
+    "pool": 8,
+    "train_steps": 300,
+    "eval_queries": 200,
+    "lr": 0.1,
+    "ewc_lambda": 0.5,
+    "seed": 7,
+    "out": "docs/benchmarks"
+  },
+  "arms": [
+    {
+      "arm": "static",
+      "matrix": [
+        [
+          0.3,
+          0.31,
+          0.205,
+          0.255
+        ],
+        [
+          0.3,
+          0.31,
+          0.205,
+          0.255
+        ],
+        [
+          0.3,
+          0.31,
+          0.205,
+          0.255
+        ],
+        [
+          0.3,
+          0.31,
+          0.205,
+          0.255
+        ]
+      ],
+      "metrics": {
+        "tasks": 4,
+        "average_accuracy": 0.2675,
+        "backward_transfer": 0.0,
+        "forward_transfer": 0.2567,
+        "forgetting": 0.0
+      },
+      "final_weights": {
+        "semantic": 0.2,
+        "lexical": 0.2,
+        "recency": 0.2,
+        "importance": 0.2,
+        "access": 0.2
+      }
+    },
+    {
+      "arm": "cl_no_ewc",
+      "matrix": [
+        [
+          0.89,
+          0.175,
+          0.125,
+          0.12
+        ],
+        [
+          0.2,
+          0.665,
+          0.155,
+          0.205
+        ],
+        [
+          0.16,
+          0.14,
+          0.845,
+          0.12
+        ],
+        [
+          0.18,
+          0.16,
+          0.15,
+          0.85
+        ]
+      ],
+      "metrics": {
+        "tasks": 4,
+        "average_accuracy": 0.335,
+        "backward_transfer": -0.6367,
+        "forward_transfer": 0.15,
+        "forgetting": 0.6367
+      },
+      "final_weights": {
+        "semantic": 0.04424476413749416,
+        "lexical": 0.025378769154800564,
+        "recency": 0.03175986958728716,
+        "importance": 0.8352142780894533,
+        "access": 0.0634023190309648
+      }
+    },
+    {
+      "arm": "cl_ewc",
+      "matrix": [
+        [
+          0.41,
+          0.42,
+          0.09,
+          0.32
+        ],
+        [
+          1.0,
+          0.17,
+          0.115,
+          0.13
+        ],
+        [
+          1.0,
+          0.17,
+          0.115,
+          0.13
+        ],
+        [
+          1.0,
+          0.17,
+          0.115,
+          0.13
+        ]
+      ],
+      "metrics": {
+        "tasks": 4,
+        "average_accuracy": 0.3538,
+        "backward_transfer": 0.1967,
+        "forward_transfer": 0.2217,
+        "forgetting": 0.0
+      },
+      "final_weights": {
+        "semantic": 1.0,
+        "lexical": 0.0,
+        "recency": 0.0,
+        "importance": 0.0,
+        "access": 0.0
+      }
+    }
+  ],
+  "headline": {
+    "static_avg_accuracy": 0.2675,
+    "cl_ewc_avg_accuracy": 0.3538,
+    "lift_vs_static": 0.0863,
+    "cl_ewc_bwt": 0.1967,
+    "cl_no_ewc_bwt": -0.6367,
+    "ewc_forgetting_reduction": 0.6367
+  }
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "user_id": "alice",
+    "key": "python-pref",
+    "content": "Alice prefers Python, Flask, and FAISS for local vector search demos.",
+    "tags": ["preference", "python", "retrieval"],
+    "importance_score": 0.9
+  },
+  {
+    "user_id": "alice",
+    "key": "aws-cost-pref",
+    "content": "Alice wants AWS Free Tier deployments with no managed databases or load balancers.",
+    "tags": ["aws", "cost"],
+    "importance_score": 0.95
+  },
+  {
+    "user_id": "alice",
+    "key": "graph-memory",
+    "content": "AegisMem connects related memories through weighted graph edges and BFS traversal.",
+    "tags": ["graph", "memory"],
+    "importance_score": 0.8
+  },
+  {
+    "user_id": "alice",
+    "key": "hash-lookup",
+    "content": "Exact memory lookup uses a SHA-256 hash index for constant-time key retrieval.",
+    "tags": ["hash", "index"],
+    "importance_score": 0.85
+  },
+  {
+    "user_id": "alice",
+    "key": "container-runtime",
+    "content": "The Flask API runs in Docker with Gunicorn and persists data on the EC2 EBS volume.",
+    "tags": ["docker", "aws"],
+    "importance_score": 0.8
+  }
+]

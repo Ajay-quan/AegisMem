@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from adapters.relational_store.control_store import ControlStore
+from apps.api.routing import route_template
 
 HEADER = "idempotency-key"
 
@@ -30,7 +31,7 @@ async def run_idempotent(
     if len(key) > 255:
         raise HTTPException(422, "Idempotency-Key too long (max 255)")
 
-    route = getattr(request.scope.get("route"), "path", request.url.path)
+    route = route_template(request) or request.url.path
     body_hash = hashlib.sha256(await request.body() + request.url.query.encode()).hexdigest()
     outcome, rec = await control.claim_idempotency(tenant_id, key, route, body_hash)
 

@@ -151,14 +151,23 @@ class OpenAICompatibleEmbeddingBackend(EmbeddingBackend):
         return out
 
 
+# Known output sizes, so a bare get_embedding_backend("openai") is correctly dimensioned.
+KNOWN_DIMENSIONS = {"text-embedding-3-small": 1536, "text-embedding-3-large": 3072,
+                    "text-embedding-ada-002": 1536, "nomic-embed-text": 768}
+
+OpenAIEmbeddingBackend = OpenAICompatibleEmbeddingBackend  # pre-merge name
+
+
 @lru_cache(maxsize=8)
-def get_embedding_backend(backend: str = "mock", model_name: str = "", dimension: int = 384,
+def get_embedding_backend(backend: str = "mock", model_name: str = "", dimension: int | None = None,
                           api_base: str = "", api_key: str = "") -> EmbeddingBackend:
     """Factory for embedding backends (cached per configuration)."""
     if backend == "openai":
-        return OpenAICompatibleEmbeddingBackend(api_base, model_name, api_key, dimension)
+        model = model_name or "text-embedding-3-small"
+        dim = dimension or KNOWN_DIMENSIONS.get(model, 0)
+        return OpenAICompatibleEmbeddingBackend(api_base or "https://api.openai.com/v1", model, api_key, dim)
     if backend == "sentence_transformers":
         return SentenceTransformerBackend(model_name=model_name or "BAAI/bge-large-en-v1.5")
     if backend == "mock":
-        return MockEmbeddingBackend(dim=dimension)
+        return MockEmbeddingBackend(dim=dimension or 384)
     raise EmbeddingError(f"Unknown embedding backend: {backend}")

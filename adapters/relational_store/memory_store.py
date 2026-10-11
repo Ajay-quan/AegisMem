@@ -60,7 +60,9 @@ class InMemoryMemoryStore:
 
     async def count_memories(self, user_id: str, namespace: str = "", tenant_id: str | None = None) -> int:
         return len([m for m in self._memories.values() if m.user_id == user_id
-                    and (tenant_id is None or m.tenant_id == tenant_id)])
+                    and (tenant_id is None or m.tenant_id == tenant_id)
+                    and (m.status if isinstance(m.status, str) else m.status.value) == "active"
+                    and (not namespace or m.namespace == namespace)])  # same semantics as Postgres
 
     async def save_fact(self, fact):
         self._facts.append(fact)
@@ -88,3 +90,7 @@ class InMemoryMemoryStore:
 
     async def close(self):
         pass
+
+
+# Name used on the pre-merge main branch.
+InMemoryRelationalStore = InMemoryMemoryStore

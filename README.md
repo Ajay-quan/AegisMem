@@ -12,6 +12,8 @@ agent remembers is **true, current, safe and provably erasable**, and it gets be
 | "Delete" leaves copies, summaries and vectors behind | **Cascading erasure** across versions, derivatives, duplicates and every store, with a **signed receipt** |
 | Screening rules never improve | **Continual learning** from reviewer decisions and corrections: calibrated per-origin trust, a self-improving risk model, learned ranking |
 | Context is lost between agents and sessions | **Handoff packets**: token-budgeted, cited briefings with open questions and recent changes |
+| Vector search misses names, ids and rare terms | **Hybrid retrieval**: dense + BM25 fused with Reciprocal Rank Fusion, then the integrity guard |
+| Agents persist whatever they see, including PII | **PII redaction at ingest** (emails, phones, cards, SSNs, IPs, secrets) before embedding or storage |
 
 Run the free [integrity audit](audit/) against any memory system to see where it stands. A typical naive
 vector memory scores 1/7; AegisMem scores 7/7.
@@ -20,7 +22,7 @@ vector memory scores 1/7; AegisMem scores 7/7.
 
 ```bash
 pip install -e ".[dev]"
-MEMORY_BACKEND=memory VECTOR_BACKEND=memory GRAPH_BACKEND=none uvicorn apps.api.main:app
+uvicorn apps.api.main:app        # zero infrastructure: in-memory stores and mock embeddings by default
 ```
 
 ```python
@@ -37,6 +39,7 @@ async with AegisMem("http://localhost:8000") as mem:
 ```
 
 Also available: a [TypeScript SDK](sdk/typescript), an [MCP server](integrations/mcp) for any MCP client,
+[LangChain/LangGraph and OpenAI Agents tools](integrations/frameworks), a CLI (`python -m apps.cli`),
 and production deployment with [Docker Compose or Kubernetes](docs/DEPLOYMENT.md).
 
 ## How it works
@@ -67,7 +70,7 @@ human outcomes (approve / reject / correct / confirm / used) ──► event log
 | Learning from reviewers (8 splits) | held-out recall 0.57 → 0.78 with FPR +0.02 |
 | Revocation (7 scenarios) | 0 revoked memories served; 100% replaced with the current version |
 | Erasure (20 subjects) | 0 residue, 100% cascade recall, 0 collateral, receipts tamper-evident |
-| **Recall impact, LoCoMo** (real embeddings, 1,536 questions) | recall@5 0.521 vs 0.514 raw vector search; 0 / 5,882 benign turns quarantined |
+| **Recall, LoCoMo** (real embeddings, 1,536 questions) | recall@5 **0.565** vs 0.514 raw vector search (+5.1 pts); 0 / 5,882 benign turns quarantined |
 | External injections (deepset, EN+DE) | recall 0.12 cold → 0.83 after reviewer learning, FPR 0.09 |
 | Overhead | screening p95 ≈ 0.05 ms, guard p95 ≈ 0.05 ms (in-memory backends) |
 

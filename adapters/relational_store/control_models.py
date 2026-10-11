@@ -112,3 +112,18 @@ class OutboxRecord(Base):
     last_error: Mapped[str] = mapped_column(Text, default="")
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditEvent(Base):
+    """Durable, tenant-scoped trail of mutating API calls (who did what, when)."""
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_tenant_time", "tenant_id", "created_at"),)
+
+    seq: Mapped[int] = mapped_column(_SeqType, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    principal: Mapped[str] = mapped_column(String(255), default="")
+    method: Mapped[str] = mapped_column(String(8), nullable=False)
+    route: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

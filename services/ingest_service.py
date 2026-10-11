@@ -11,8 +11,11 @@ from core.schemas.memory import (
 from domain.integrity.provenance import (
     base_trust, derived_from, derived_trust, get_trust, should_quarantine,
 )
+from core.config.settings import settings
 from core.observability.metrics import WRITES
+from domain.privacy.redaction import redact
 from opentelemetry import trace
+from core.observability.tracing import tracer
 from services.vector_sync import index_payload
 from domain.memory.scoring import compute_importance_heuristic
 
@@ -50,9 +53,28 @@ class IngestionService:
         memory_type: MemoryType = MemoryType.OBSERVATION,
         importance_override: float | None = None,
     ) -> MemoryItem:
-        """Convert an observation into a stored memory."""
+        """Convert an observation into a stored memory (span: aegis.ingest)."""
+        with tracer.start_as_current_span("aegis.ingest"):
+            return await self._ingest_observation(observation, memory_type, importance_override)
+
+    async def _ingest_observation(
+        self,
+        observation: Observation,
+        memory_type: MemoryType = MemoryType.OBSERVATION,
+        importance_override: float | None = None,
+    ) -> MemoryItem:
+        pii: dict[str, Any] = {}
+        if settings.pii_redaction_enabled:
+            # Redact at the boundary, before screening and embedding: raw PII is never
+            # embedded, indexed, scored or retrievable.
+            result = redact(observation.content)
+            if result.redacted:
+                observation = observation.model_copy(update={"content": result.text})
+                pii = {"pii_redacted": True, "pii_counts": result.counts}
+                logger.info(f"Redacted {result.total} PII token(s) at ingest: {result.counts}")
         importance = importance_override or compute_importance_heuristic(observation.content)
         metadata, status = await self._provenance(observation)
+        metadata.update(pii)
 
         memory = MemoryItem(
             namespace=f"user:{observation.user_id}",
@@ -159,9 +181,9 @@ class IngestionService:
             logger.warning(f"Quarantined memory from session={observation.session_id}: {reason}")
         outcome = f"quarantined_{quarantine['trigger']}" if quarantine else "stored"
         WRITES.labels(getattr(self._db, "tenant_id", "unscoped"), source, outcome).inc()
-        span = trace.get_current_span()
-        span.set_attributes({"aegis.write.source": source, "aegis.write.outcome": outcome,
-                             "aegis.write.trust": round(trust, 3)})
+        trace.get_current_span().set_attributes({
+            "aegis.write.source": source, "aegis.write.outcome": outcome,
+            "aegis.write.trust": round(trust, 3)})
         return metadata, status
 
     async def ingest_batch(

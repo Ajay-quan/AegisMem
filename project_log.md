@@ -359,3 +359,56 @@ Ollama `nomic-embed-text` (768-d), a Docker Compose stack in staging config (:58
 - Compose project: `aegis-smoke`.
 - kind cluster: `aegis`.
 - Isolated Mem0 venv: in the session scratchpad.
+
+### 2026-10-11 · Session 9: Merged `main` (v0.3.0 "stateful.ai" line) into `q1/production-core`
+
+**Interaction:**
+- PR #1 (`q1/production-core` → `main`) was opened by the user. GitHub reported it not mergeable: `main` had 7 newer commits (the user's own, made in parallel: rebrand to stateful.ai, v0.2–0.3), 343 files changed, 22 conflicts.
+- The user decided the name is **AegisMem** and left the technical calls to me.
+
+**Approach:**
+- Merged `main` into the branch with no force-push and no history rewrite.
+- Q1 is the backbone for conflicted files. `main`'s non-duplicative capabilities were ported, duplicates consolidated, and retired code stays in history at `e20ba0b`.
+- Rationale is recorded in `docs/adr/0005-merge-integrity-architecture.md`; ADRs 0001–0004 are marked superseded.
+
+**Ported from main:**
+- BM25 + RRF hybrid retrieval as a candidate stage before the guard.
+- Cross-encoder option.
+- PII redaction at ingest, before screening and embedding.
+- Security headers, a 413 body limit, the error envelope.
+- `/stats`.
+- Retrieval and feedback telemetry (renamed `aegis_*`).
+- Zero-infra dev defaults with `relational_store`/`strict_stores` aliases.
+- EWC policy, replay buffer and BWT/FWT modules kept as an evaluation harness.
+- The CLI, rewired to the SDK.
+- The Next.js landing site, rebranded.
+- The audit trail, made **durable and tenant-scoped** (`audit_events`, migration 0006, `GET /api/v1/admin/audit`).
+
+**Retired (superseded):**
+- Flask demo stack: Flask app, JSON store, FAISS store (sync, pickle metadata), local graph, cache index, landing HTML.
+- Single-key registry and in-process audit.
+- `query_id` feedback.
+- Stdlib SDK and main's MCP server.
+- Root Dockerfile, `requirements*.txt`, `push.sh` (which auto-pushed to main), committed `build/`, `architecture.drawio`.
+
+**Measured decisions:**
+- LoCoMo, full dataset with real embeddings: hybrid blend 0.15 with pool 2,000 gives recall@5 **0.565 vs 0.514** raw (+5.1 pts).
+- Main's defaults (pool 200) scored 0.418, because BM25 only saw the newest 200 memories. Defaults are now set accordingly.
+
+**Bugs found and fixed during the merge:**
+1. **The "unexplained one-off" from Session 8 is solved.** On a fresh Postgres, `create_all` ran before the vector extension existed. `ensure_pgvector()` now runs in every schema path.
+2. **FastAPI 0.143** (what production installs) reports included-router routes with *relative* paths. That broke admin scopes, metrics labels and the audit trail. The route-scope coverage test had become **vacuous** (it walked `app.routes`, which no longer exposes routers).
+   - Fix: `apps/api/routing.route_template()` reconstructs the full template from public data.
+   - The coverage test now enumerates the OpenAPI schema and asserts at least 25 routes were checked.
+   - The local venv was upgraded to match production.
+3. The in-memory store counted deleted memories (Postgres doesn't). Fixed.
+4. **Tests read the developer's `.env`.** The local `.env` set `sentence_transformers`/`bge-large`. Tests now set `AEGIS_ENV_FILE=""`, and the suite went from ~40 s to ~16 s.
+5. Deployments relied on old defaults. Compose, Kustomize and Helm now declare `MEMORY_BACKEND` explicitly, with a test enforcing it.
+6. `.env.example` documented settings that don't exist. It was rewritten, and a test now enforces that every key is a real setting.
+
+**Verification:**
+- 253 passed locally (+4 skipped live-service tests).
+- **281 passed** with Postgres + pgvector, Redis and Qdrant on a **fresh database** (twice).
+- All bench gates pass. Migrations 0001→0006 are clean on Postgres and SQLite.
+- Compose stack on FastAPI 0.143: ready; aegis-audit **7/7**; durable audit trail and `/stats` verified.
+- `helm lint --strict` passes. Version is **0.4.0**, and no "stateful.ai" references remain.

@@ -71,13 +71,19 @@ class TestAuthorization:
         assert (await c.get("/api/v1/admin/keys", headers=reader)).status_code == 403
 
     def test_every_route_has_a_scope_policy(self):
-        """Fail-closed guarantee: adding a route without a policy breaks the build."""
-        missing = []
-        for r in app.routes:
-            if isinstance(r, APIRoute) and r.path.startswith(API_PREFIX) and not r.path.startswith("/api/v1/eval"):
-                for m in r.methods:
-                    if (m, r.path[len(API_PREFIX):]) not in ROUTE_SCOPES:
-                        missing.append(f"{m} {r.path}")
+        """Fail-closed guarantee: adding a route without a policy breaks the build.
+        Enumerated via the OpenAPI schema (public across FastAPI versions; walking app.routes
+        silently found nothing once FastAPI started wrapping included routers)."""
+        paths = app.openapi()["paths"]
+        checked, missing = 0, []
+        for path, ops in paths.items():
+            if not path.startswith(API_PREFIX) or path.startswith("/api/v1/eval"):
+                continue
+            for method in ops:
+                checked += 1
+                if (method.upper(), path[len(API_PREFIX):]) not in ROUTE_SCOPES:
+                    missing.append(f"{method.upper()} {path}")
+        assert checked >= 25, f"only {checked} routes enumerated: the coverage check is vacuous"
         assert not missing, f"routes without scope policy: {missing}"
 
 
@@ -135,4 +141,9 @@ class TestBootGuards:
             validate_runtime_config()
         monkeypatch.setattr(settings, "app_secret_key", "x" * 48)
         monkeypatch.setattr(settings, "api_key_pepper", "p" * 48)
+        with pytest.raises(RuntimeError, match="development-only"):
+            validate_runtime_config()  # zero-infra defaults are refused in production
+        for name, value in (("memory_backend", "postgres"), ("vector_backend", "pgvector"),
+                            ("graph_backend", "none"), ("embedding_backend", "openai")):
+            monkeypatch.setattr(settings, name, value)
         validate_runtime_config()

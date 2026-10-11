@@ -2,6 +2,9 @@
 import sys
 import os
 
+# Tests must not read a developer's personal .env (set before settings are imported).
+os.environ["AEGIS_ENV_FILE"] = ""
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

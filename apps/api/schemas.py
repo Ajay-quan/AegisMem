@@ -306,3 +306,15 @@ class TrustSource(BaseModel):
 class TrustSourcesResponse(BaseModel):
     sources: list[TrustSource]
     guard_min_trust: float
+
+
+class StatsResponse(BaseModel):
+    user_id: str
+    total_memories: int
+    namespaces: list[str]
+    by_type: dict[str, int] = Field(default_factory=dict)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    avg_importance: float = 0.0
+    total_access_count: int = 0
+    unresolved_contradictions: int = 0
+    last_memory_at: str = ""

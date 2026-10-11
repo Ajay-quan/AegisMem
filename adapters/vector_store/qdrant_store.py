@@ -20,6 +20,9 @@ def _point_id(memory_id: str) -> str:
     return str(uuid.uuid5(_POINT_NS, memory_id))
 
 
+point_id_for = _point_id  # public alias (used by migrations/tools)
+
+
 class QdrantStore(VectorStore):
     """Qdrant-backed vector store."""
 

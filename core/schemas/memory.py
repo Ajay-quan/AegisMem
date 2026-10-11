@@ -261,6 +261,10 @@ class RetrievalResult(BaseModel):
     )
     retrieved_at: datetime = Field(default_factory=utcnow)
     latency_ms: float = 0.0
+    # Correlation id for the AegisMem-CL feedback loop: clients echo this back to
+    # POST /feedback so served candidates become labeled training examples.
+    # Empty when continual learning is disabled.
+    query_id: str = ""
 
 
 # ---------------------------------------------------------------------------

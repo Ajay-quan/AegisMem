@@ -16,6 +16,7 @@ config:
   APP_ENV: production
   AUTH_ENABLED: "true"
   REQUIRE_RLS: "true"
+  MEMORY_BACKEND: postgres
   VECTOR_BACKEND: pgvector
   GRAPH_BACKEND: none
   RATE_LIMIT_BACKEND: redis

@@ -18,8 +18,11 @@ from apps.api.routers import router
 from apps.api.eval_router import eval_router
 from apps.api.admin_router import admin_router
 from apps.api.auth import authorize, require_admin
+from apps.api.routing import route_template
+from apps.api.security import install_security
 from adapters.tenancy import TenantViolation
 from core.exceptions import MemoryNotFoundError
+from core.version import ENGINE_NAME, PRODUCT_NAME, __version__
 from core.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS, REGISTRY
 from core.observability.tracing import setup_tracing, tracer
 from opentelemetry.propagate import extract
@@ -100,7 +103,7 @@ def validate_runtime_config() -> None:
         problems.append("API_KEY_PEPPER must be set (separate from APP_SECRET_KEY)")
     if settings.embedding_backend == "mock":
         problems.append("EMBEDDING_BACKEND=mock produces meaningless vectors; configure a real backend")
-    for name in ("memory_backend", "vector_backend"):
+    for name in ("memory_backend", "vector_backend", "graph_backend"):
         if getattr(settings, name) == "memory":
             problems.append(f"{name.upper()}=memory is development-only")
     if problems:
@@ -109,17 +112,19 @@ def validate_runtime_config() -> None:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="AegisMem - Persistent Memory for LLM Agents",
+        title=f"{PRODUCT_NAME} - the trust layer for agent memory",
         description=(
             "Production-grade persistent memory system for long-running LLM agents. "
             "Supports multi-store hybrid retrieval, versioned updates, contradiction detection, "
             "and higher-level reflection generation."
         ),
-        version="0.1.0",
+        version=__version__,
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+
+    install_security(app)
 
     # CORS
     app.add_middleware(
@@ -138,7 +143,7 @@ def create_app() -> FastAPI:
             f"HTTP {request.method}", context=extract(request.headers), kind=SpanKind.SERVER,
         ) as span:
             response = await call_next(request)
-            route = getattr(request.scope.get("route"), "path", "unmatched")  # template, not raw path
+            route = route_template(request) or "unmatched"  # template, not raw path
             span.update_name(f"{request.method} {route}")
             span.set_attributes({"http.request.method": request.method, "http.route": route,
                                  "http.response.status_code": response.status_code,
@@ -181,9 +186,10 @@ def create_app() -> FastAPI:
     async def health():
         return HealthResponse(
             status="ok",
-            version="0.1.0",
+            version=__version__,
             components={
                 "api": "ok",
+                "product": PRODUCT_NAME,
                 "config": settings.app_env,
             },
         )
@@ -217,8 +223,9 @@ def create_app() -> FastAPI:
     @app.get("/", tags=["system"])
     async def root():
         return {
-            "name": "AegisMem",
-            "version": "0.1.0",
+            "name": PRODUCT_NAME,
+            "engine": ENGINE_NAME,
+            "version": __version__,
             "description": "Persistent Memory Architecture for LLM Agents",
             "docs": "/docs",
             "health": "/health",

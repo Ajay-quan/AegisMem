@@ -194,6 +194,15 @@ class AegisMem:
         payload = receipt.model_dump() if isinstance(receipt, m.ErasureReceipt) else receipt
         return (await self._request("POST", "/receipts/verify", json=payload, idempotent=True))["valid"]
 
+    async def stats(self, user_id: str, namespace: str = "") -> dict[str, Any]:
+        return await self._request("GET", "/stats", params={"user_id": user_id, "namespace": namespace},
+                                   idempotent=True)
+
+    async def health(self) -> dict[str, Any]:
+        r = await self._http.get(self._base + "/health")
+        r.raise_for_status()
+        return r.json()
+
     async def trust_sources(self) -> list[dict[str, Any]]:
         return (await self._request("GET", "/trust/sources", idempotent=True))["sources"]
 

@@ -19,8 +19,9 @@ from core.schemas.memory import (
     MemoryItem, RetrievalQuery, RetrievalResult, RetrievalCandidate,
 )
 from domain.memory.scoring import score_memory_for_retrieval, rank_candidates
-from core.observability.metrics import GUARD_DECISIONS
+from core.observability.metrics import GUARD_DECISIONS, observe_retrieval_results
 from core.observability.tracing import tracer
+from domain.memory.lexical import BM25Index, normalize_scores, reciprocal_rank_fusion
 from domain.memory.reranker import HeuristicReranker
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class RetrievalService:
         """Main retrieval entry point (span: aegis.retrieve)."""
         with tracer.start_as_current_span("aegis.retrieve") as span:
             result = await self._retrieve(query)
+            observe_retrieval_results(len(result.candidates), result.total_found)
             span.set_attributes({"aegis.retrieval_id": result.retrieval_id,
                                  "aegis.returned": len(result.candidates),
                                  "aegis.guard_interventions": len(result.guard_report),
@@ -68,8 +70,13 @@ class RetrievalService:
     async def _retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         start = time.time()
 
-        # Stage 1: Broad semantic retrieval (over-retrieve).
-        semantic_candidates = await self._semantic_search(query)
+        # Stage 1: dense retrieval, plus BM25 over the user's corpus when hybrid is on; the
+        # two rankings are fused with Reciprocal Rank Fusion. Every fused candidate then goes
+        # through the integrity guard below, so the lexical path cannot leak revoked data.
+        dense = await self._semantic_search(query)
+        lexical = await self._lexical_search(query) if settings.hybrid_retrieval_enabled else []
+        semantic_candidates = self._fuse(dense, lexical)
+        lexical_scores = normalize_scores(lexical)
 
         # Stage 2: Enrich with full records + multi-signal scoring,
         # using per-user learned weights once enough feedback exists.
@@ -80,6 +87,9 @@ class RetrievalService:
         enriched = await self._enrich_candidates(
             semantic_candidates, query, weights=weights, guard_report=guard_report,
         )
+
+        for c in enriched:
+            c.lexical_score = lexical_scores.get(c.memory.memory_id, 0.0)
 
         # Stage 3: Symbolic filters (time range, type, importance).
         filtered = self._apply_filters(enriched, query)
@@ -116,6 +126,36 @@ class RetrievalService:
         if self._ledger is not None:
             await self._ledger.record(result)
         return result
+
+    async def _lexical_search(self, query: RetrievalQuery) -> list[tuple[str, float]]:
+        """BM25 over the user's active memories (pure Python; rare tokens, names, ids)."""
+        try:
+            memories = await self._db.list_memories(
+                user_id=query.user_id, namespace=query.namespace,
+                limit=settings.lexical_candidate_pool,
+            )
+            if not memories:
+                return []
+            index = BM25Index.build([(m.memory_id, m.content) for m in memories],
+                                    k1=settings.bm25_k1, b=settings.bm25_b)
+            return index.search(query.query_text,
+                                top_k=max(settings.retrieval_top_n_candidates, query.top_k * 4))
+        except Exception as e:
+            logger.warning(f"Lexical search failed: {e}")
+            return []
+
+    @staticmethod
+    def _fuse(dense: list[tuple[str, float]], lexical: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        """RRF-ordered candidates with a blended relevance score for ranking."""
+        if not lexical:
+            return dense
+        dense_map = dict(dense)
+        lex_map = normalize_scores(lexical)
+        order = reciprocal_rank_fusion([[i for i, _ in dense], [i for i, _ in lexical]],
+                                       k=settings.rrf_k)
+        w = settings.hybrid_lexical_weight
+        return [(mid, (1 - w) * max(0.0, dense_map.get(mid, 0.0)) + w * lex_map.get(mid, 0.0))
+                for mid, _ in order]
 
     async def _semantic_search(
         self, query: RetrievalQuery,

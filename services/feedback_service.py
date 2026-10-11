@@ -19,6 +19,7 @@ from typing import Any
 from core.schemas.memory import RetrievalResult
 from domain.learning import OnlineWeightLearner
 from domain.memory.scoring import memory_utility
+from core.observability.metrics import inc_policy_update, observe_feedback
 from domain.learning.trust_calibrator import memory_source_origin
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,8 @@ class FeedbackService:
                 logger.warning(f"Feedback counter update failed for {memory_id}: {e}")
 
         state = await self._learner.observe(user_id, examples)
+        observe_feedback(True, "recorded", len(used) / max(len(examples), 1))
+        inc_policy_update()
         active = state.events >= self._learner.min_events
         return {
             "accepted": len(examples),
