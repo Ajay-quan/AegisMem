@@ -1,4 +1,4 @@
-# Contributing to stateful.ai / stateful.ai
+# Contributing to AegisMem / AegisMem
 
 Thanks for your interest in contributing. This guide gets you productive fast.
 
@@ -7,8 +7,8 @@ Thanks for your interest in contributing. This guide gets you productive fast.
 Requires Python 3.11+ (the package targets 3.11) and Node 18+ for the frontend.
 
 ```bash
-git clone https://github.com/Ajay-quan/stateful.ai.git
-cd stateful.ai
+git clone https://github.com/Ajay-quan/AegisMem.git
+cd AegisMem
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pip install pytest pytest-asyncio httpx        # test deps
@@ -44,14 +44,14 @@ core/        config, schemas, logging, observability, security, version
 domain/      pure logic: memory scoring, lexical/BM25, reranker, learning, privacy, evaluations
 services/    orchestration: ingest, retrieve, update, contradiction, reflect, feedback
 adapters/    swappable backends: relational, vector, graph, embeddings, llm
-apps/        FastAPI app + Flask demo + worker + CLI
+apps/        FastAPI app (api/) + CLI
 integrations/ MCP server
 sdk/         zero-dependency Python client
-src/         Next.js frontend (stateful.ai marketing site)
+src/         Next.js frontend (AegisMem marketing site)
 ```
 
 Architecture: `API → services → domain → adapters`, every external backend
-behind an adapter, defaults in-memory. See `docs/stateful_ai_architecture.md`,
+behind an adapter, defaults in-memory. See `docs/architecture.md`,
 `docs/continual_learning_design.md`, and `docs/ELITE_UPGRADE.md`.
 
 ## Conventions

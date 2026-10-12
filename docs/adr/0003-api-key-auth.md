@@ -1,5 +1,7 @@
 # ADR 0003: Optional API Key Authentication
 
+> **Status: Superseded** by [ADR 0005](0005-merge-integrity-architecture.md) (2026-10-11). Kept for history.
+
 ## Status
 
 Accepted
@@ -10,7 +12,7 @@ A public EC2 demo endpoint should not allow unrestricted writes if left online. 
 
 ## Decision
 
-Support optional static API-key auth with `STATEFUL_AI_API_KEY`. When configured, API routes require `X-API-Key`; `/` and `/health` remain public for quick checks.
+Support optional static API-key auth with `AEGISMEM_API_KEY`. When configured, API routes require `X-API-Key`; `/` and `/health` remain public for quick checks.
 
 ## Consequences
 

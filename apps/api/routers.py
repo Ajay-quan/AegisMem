@@ -4,13 +4,18 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from apps.api.dependencies import (
     get_ingest_service, get_retrieve_service, get_update_service,
     get_reflect_service, get_contradiction_service, get_db_store,
-    get_feedback_service,
+    get_feedback_service, get_handoff_service, get_learner,
+    get_erasure_service, get_vector_store, get_outcome_service, get_calibrator,
+    get_risk_model, get_tenant_id,
 )
+from apps.api.control import get_control_store
+from apps.api.idempotency import run_idempotent
+from core.schemas.memory import MemoryType
 from apps.api.schemas import (
     IngestRequest, IngestResponse, BatchIngestRequest, BatchIngestResponse,
     RetrieveRequest, RetrieveResponse, MemorySnippet,
@@ -18,9 +23,17 @@ from apps.api.schemas import (
     UpdateRequest, UpdateResponse,
     ReflectRequest, ReflectResponse,
     ContradictionScanRequest, ContradictionScanResponse, ContradictionListResponse,
-    StatsResponse,
-    FeedbackRequest, FeedbackResponse, LearningStatsResponse,
+    HandoffRequest, FeedbackRequest, FeedbackResponse, LearningStateResponse,
+    ForgetRequest, ErasureReceipt, ReceiptVerifyResponse,
+    QuarantineItem, QuarantineListResponse,
+    CorrectionRequest, CorrectionResponse, TrustSourcesResponse, StatsResponse,
 )
+from core.config.settings import settings
+from services.outcome_service import OutcomeError
+from services.erasure_service import ErasureError
+from services.feedback_service import FeedbackError
+from services.handoff_service import HandoffPacket
+from domain.learning.weight_learner import default_weights
 from core.schemas.memory import Observation, SourceType, RetrievalQuery
 from core.exceptions import MemoryNotFoundError
 
@@ -34,29 +47,14 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
-async def ingest_memory(
-    request: IngestRequest,
-    svc=Depends(get_ingest_service),
-):
-    """Ingest a single observation into memory."""
+def _parse_types(item: IngestRequest) -> tuple[MemoryType, SourceType]:
     try:
-        from core.schemas.memory import MemoryType
-        mem_type = MemoryType(request.memory_type)
-        src_type = SourceType(request.source_type)
+        return MemoryType(item.memory_type), SourceType(item.source_type)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    memory = await svc.ingest_text(
-        text=request.text,
-        user_id=request.user_id,
-        session_id=request.session_id,
-        agent_id=request.agent_id,
-        memory_type=mem_type,
-        source_type=src_type,
-        metadata=request.metadata,
-    )
 
+def _ingest_response(memory) -> IngestResponse:
     return IngestResponse(
         memory_id=memory.memory_id,
         user_id=memory.user_id,
@@ -64,35 +62,72 @@ async def ingest_memory(
         importance_score=memory.importance_score,
         content_preview=memory.content[:200],
         created_at=memory.created_at,
+        status=memory.status if isinstance(memory.status, str) else memory.status.value,
+        quarantine_reason=(memory.metadata.get("quarantine") or {}).get("reason"),
+        trust=(memory.metadata.get("provenance") or {}).get("trust"),
     )
+
+
+@router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
+async def ingest_memory(
+    request: IngestRequest,
+    http_request: Request,
+    svc=Depends(get_ingest_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
+    """Ingest a single observation. Send ``Idempotency-Key`` to make retries safe."""
+    mem_type, src_type = _parse_types(request)
+
+    async def handler():
+        memory = await svc.ingest_text(
+            text=request.text,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            agent_id=request.agent_id,
+            memory_type=mem_type,
+            source_type=src_type,
+            metadata=request.metadata,
+        )
+        return _ingest_response(memory)
+
+    return await run_idempotent(http_request, tenant, control, handler, status_code=201)
 
 
 @router.post("/ingest/batch", response_model=BatchIngestResponse, status_code=status.HTTP_201_CREATED)
 async def ingest_batch(
     request: BatchIngestRequest,
+    http_request: Request,
     svc=Depends(get_ingest_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
 ):
-    """Batch ingest multiple observations."""
-    ingested = 0
-    failed = 0
-    memory_ids = []
+    """Batch ingest. Every item is screened with its own declared source type."""
+    if len(request.items) > 500:
+        raise HTTPException(status_code=422, detail="batch too large (max 500 items)")
+    parsed = [_parse_types(item) for item in request.items]  # validate all before writing any
 
-    for item in request.items:
-        try:
-            memory = await svc.ingest_text(
-                text=item.text,
-                user_id=item.user_id,
-                session_id=item.session_id,
-                agent_id=item.agent_id,
-                metadata=item.metadata,
-            )
-            memory_ids.append(memory.memory_id)
-            ingested += 1
-        except Exception as e:
-            logger.error(f"Batch ingest item failed: {e}")
-            failed += 1
+    async def handler():
+        ingested, failed, memory_ids = 0, 0, []
+        for item, (mem_type, src_type) in zip(request.items, parsed):
+            try:
+                memory = await svc.ingest_text(
+                    text=item.text,
+                    user_id=item.user_id,
+                    session_id=item.session_id,
+                    agent_id=item.agent_id,
+                    memory_type=mem_type,
+                    source_type=src_type,
+                    metadata=item.metadata,
+                )
+                memory_ids.append(memory.memory_id)
+                ingested += 1
+            except Exception as e:
+                logger.error(f"Batch ingest item failed: {e}")
+                failed += 1
+        return BatchIngestResponse(ingested=ingested, failed=failed, memory_ids=memory_ids)
 
-    return BatchIngestResponse(ingested=ingested, failed=failed, memory_ids=memory_ids)
+    return await run_idempotent(http_request, tenant, control, handler, status_code=201)
 
 
 # ---------------------------------------------------------------------------
@@ -147,71 +182,13 @@ async def retrieve_memories(
     context = "\n".join([f"[{s.rank}] {s.content}" for s in snippets]) if snippets else ""
 
     return RetrieveResponse(
+        retrieval_id=result.retrieval_id,
         query=request.query,
         results=snippets,
         total_found=result.total_found,
         latency_ms=result.latency_ms,
         context_window=context,
-        query_id=result.query_id,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Feedback / continual learning (Stateful-CL)
-# ---------------------------------------------------------------------------
-
-
-@router.post("/feedback", response_model=FeedbackResponse)
-async def submit_feedback(
-    request: FeedbackRequest,
-    svc=Depends(get_feedback_service),
-):
-    """Report whether a retrieved memory was useful, driving online learning.
-
-    Echo the ``query_id`` from a prior /retrieve response plus the ``memory_id``
-    being judged. When continual learning is enabled this shapes a reward and
-    updates the per-namespace ranking policy; otherwise it is a safe no-op.
-    """
-    result = await svc.record(
-        query_id=request.query_id,
-        memory_id=request.memory_id,
-        useful=request.useful,
-        score=request.score,
-        outcome=request.outcome,
-    )
-    return FeedbackResponse(
-        recorded=result.recorded,
-        reward=result.reward,
-        namespace=result.namespace,
-        policy_updates=result.policy_updates,
-        weights=result.weights,
-        message=result.message,
-    )
-
-
-@router.get("/audit")
-async def audit_log(limit: int = 100):
-    """Recent mutating operations with the principal that performed them.
-
-    Auth-protected (lives under /api/). Newest first. Bounded ring buffer; wire
-    to a durable sink for long-term retention in production.
-    """
-    from core.security.audit import get_audit_log
-    log = get_audit_log()
-    return {"total": len(log), "entries": log.list(limit=limit)}
-
-
-@router.get("/learning/stats", response_model=LearningStatsResponse)
-async def learning_stats():
-    """Inspect the continual-learning state: replay buffer + policy per namespace."""
-    from core.config.settings import settings as _settings
-    if not _settings.continual_learning_enabled:
-        return LearningStatsResponse(enabled=False, replay={}, policy={})
-    from domain.learning.registry import get_ranking_policy, get_replay_buffer
-    return LearningStatsResponse(
-        enabled=True,
-        replay=get_replay_buffer().stats(),
-        policy=get_ranking_policy().stats(),
+        guard_report=result.guard_report,
     )
 
 
@@ -387,26 +364,217 @@ async def list_contradictions(resolved: bool = False, db=Depends(get_db_store)):
 
 
 # ---------------------------------------------------------------------------
+# Handoff
+# ---------------------------------------------------------------------------
+
+
+@router.post("/handoff", response_model=HandoffPacket)
+async def build_handoff(request: HandoffRequest, svc=Depends(get_handoff_service)):
+    """Build a token-budgeted, cited context packet for a new agent, model or session."""
+    return await svc.build(
+        user_id=request.user_id,
+        namespace=request.namespace,
+        task=request.task,
+        since=request.since,
+        token_budget=request.token_budget,
+        max_per_section=request.max_per_section,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feedback / continual learning
+# ---------------------------------------------------------------------------
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackRequest, svc=Depends(get_feedback_service)):
+    """Report which memories from a retrieval were used. Trains per-user ranking weights."""
+    try:
+        return await svc.submit(
+            retrieval_id=request.retrieval_id,
+            user_id=request.user_id,
+            used_memory_ids=request.used_memory_ids,
+        )
+    except FeedbackError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/learning/{user_id}", response_model=LearningStateResponse)
+async def get_learning_state(user_id: str, learner=Depends(get_learner)):
+    """Inspect what the system has learned about ranking for this user."""
+    state = await learner.state(user_id)
+    defaults = default_weights()
+    if state is None:
+        return LearningStateResponse(
+            user_id=user_id, learning_active=False, events=0, positives=0,
+            weights=defaults, default_weights=defaults,
+        )
+    return LearningStateResponse(
+        user_id=user_id,
+        learning_active=state.events >= learner.min_events,
+        events=state.events,
+        positives=state.positives,
+        weights={k: round(v, 4) for k, v in state.weights.items()},
+        default_weights=defaults,
+    )
+
+
+@router.delete("/learning/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_learning_state(user_id: str, learner=Depends(get_learner)):
+    """Discard learned ranking weights for this user (reverts to defaults)."""
+    await learner.reset(user_id)
+
+
+# ---------------------------------------------------------------------------
+# Integrity: verifiable erasure
+# ---------------------------------------------------------------------------
+
+
+@router.post("/forget", response_model=ErasureReceipt, tags=["integrity"])
+async def forget(
+    request: ForgetRequest,
+    http_request: Request,
+    svc=Depends(get_erasure_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
+    """Erase memories plus prior versions, derived memories and duplicates; return a signed receipt."""
+    async def handler():
+        try:
+            return await svc.forget(
+                user_id=request.user_id,
+                memory_ids=request.memory_ids,
+                all_for_user=request.all_for_user,
+                include_duplicates=request.include_duplicates,
+                reason=request.reason,
+            )
+        except ErasureError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    return await run_idempotent(http_request, tenant, control, handler)
+
+
+@router.get("/receipts/{receipt_id}", response_model=ErasureReceipt, tags=["integrity"])
+async def get_receipt(receipt_id: str, svc=Depends(get_erasure_service)):
+    receipt = await svc.get_receipt(receipt_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="receipt not found")
+    return receipt
+
+
+@router.post("/receipts/verify", response_model=ReceiptVerifyResponse, tags=["integrity"])
+async def verify_receipt(receipt: ErasureReceipt, svc=Depends(get_erasure_service)):
+    """Check that a receipt was issued by this deployment and has not been altered."""
+    return ReceiptVerifyResponse(valid=svc.verify_receipt(receipt.model_dump()))
+
+
+# ---------------------------------------------------------------------------
+# Integrity: quarantine review
+# ---------------------------------------------------------------------------
+
+
+@router.get("/quarantine/{user_id}", response_model=QuarantineListResponse, tags=["integrity"])
+async def list_quarantine(user_id: str, db=Depends(get_db_store)):
+    """Memories held back at ingest (low-trust, instruction-like). Never served until released."""
+    held = await db.list_memories(user_id=user_id, status="pending", limit=200)
+    items = [
+        QuarantineItem(
+            memory_id=m.memory_id,
+            content=m.content,
+            reason=(m.metadata.get("quarantine") or {}).get("reason", ""),
+            trust=float((m.metadata.get("provenance") or {}).get("trust", 0.0)),
+            source=str((m.metadata.get("provenance") or {}).get("source", "")),
+            created_at=m.created_at,
+        )
+        for m in held
+    ]
+    return QuarantineListResponse(items=items, total=len(items))
+
+
+@router.post("/quarantine/{memory_id}/release", tags=["integrity"])
+async def release_quarantine(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """Approve held content after review. It becomes retrievable, and its origin earns trust."""
+    try:
+        return await svc.release(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/quarantine/{memory_id}/reject", tags=["integrity"])
+async def reject_quarantine(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """Reject held content. Its origin loses trust deployment-wide, and the content is erased with a receipt."""
+    try:
+        return await svc.reject(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Continual learning from outcomes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/corrections", response_model=CorrectionResponse, tags=["learning"])
+async def submit_correction(
+    request: CorrectionRequest,
+    http_request: Request,
+    svc=Depends(get_outcome_service),
+    tenant: str = Depends(get_tenant_id),
+    control=Depends(get_control_store),
+):
+    """Correct a memory. ``wrong`` teaches distrust of its origin; ``outdated`` does not.
+    Memories derived from it are flagged as suspect and returned."""
+    async def handler():
+        try:
+            return await svc.correct(
+                user_id=request.user_id,
+                memory_id=request.memory_id,
+                kind=request.kind,
+                corrected_text=request.corrected_text,
+                note=request.note,
+            )
+        except OutcomeError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    return await run_idempotent(http_request, tenant, control, handler)
+
+
+@router.post("/memories/{memory_id}/confirm", tags=["learning"])
+async def confirm_memory(memory_id: str, user_id: str, svc=Depends(get_outcome_service)):
+    """User or reviewer confirms a memory is correct; its origin earns trust."""
+    try:
+        return await svc.confirm(user_id=user_id, memory_id=memory_id)
+    except OutcomeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/trust/sources", response_model=TrustSourcesResponse, tags=["learning"])
+async def trust_sources(calibrator=Depends(get_calibrator)):
+    """Learned reliability of every source/origin, least trusted first."""
+    rows = await calibrator.snapshot()
+    return TrustSourcesResponse(sources=rows, guard_min_trust=settings.guard_min_trust)
+
+
+@router.get("/risk-model", tags=["learning"])
+async def risk_model_stats(model=Depends(get_risk_model)):
+    """How the write-risk model has adapted: reviewed holds, precision, live thresholds, top risk signals."""
+    return model.stats()
+
+
+# ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 
 
 @router.get("/stats", response_model=StatsResponse)
 async def memory_stats(user_id: str, namespace: str = "", db=Depends(get_db_store)):
-    """Aggregate statistics for a user's memory store.
-
-    Powers operational dashboards: counts by type and status, importance
-    distribution, access totals, and unresolved contradiction count.
-    """
-    memories = await db.list_memories(
-        user_id=user_id, namespace=namespace, status="", limit=10_000, offset=0,
-    )
+    """Aggregate statistics for one user's memories (tenant-scoped): counts by type and
+    status, importance, access totals and unresolved contradictions."""
+    memories = await db.list_memories(user_id=user_id, namespace=namespace, status="", limit=10_000)
     by_type: dict[str, int] = {}
     by_status: dict[str, int] = {}
     namespaces: set[str] = set()
-    total_access = 0
-    importance_sum = 0.0
-    last_at = ""
+    total_access, importance_sum, last_at = 0, 0.0, ""
     for m in memories:
         mtype = m.memory_type if isinstance(m.memory_type, str) else m.memory_type.value
         mstatus = m.status if isinstance(m.status, str) else m.status.value
@@ -415,22 +583,17 @@ async def memory_stats(user_id: str, namespace: str = "", db=Depends(get_db_stor
         namespaces.add(m.namespace)
         total_access += m.access_count
         importance_sum += m.importance_score
-        created = m.created_at.isoformat() if hasattr(m.created_at, "isoformat") else str(m.created_at)
-        last_at = max(last_at, created)
-
+        last_at = max(last_at, m.created_at.isoformat())
+    ids = {m.memory_id for m in memories}
     try:
-        contradictions = await db.list_contradictions(resolved=False)
+        contradictions = [c for c in await db.list_contradictions(resolved=False)
+                          if c.get("memory_a_id") in ids or c.get("memory_b_id") in ids]
     except Exception:
         contradictions = []
-
     return StatsResponse(
-        user_id=user_id,
-        total_memories=len(memories),
-        namespaces=sorted(n for n in namespaces if n),
-        by_type=by_type,
-        by_status=by_status,
+        user_id=user_id, total_memories=len(memories), namespaces=sorted(n for n in namespaces if n),
+        by_type=by_type, by_status=by_status,
         avg_importance=round(importance_sum / len(memories), 4) if memories else 0.0,
-        total_access_count=total_access,
-        unresolved_contradictions=len(contradictions),
+        total_access_count=total_access, unresolved_contradictions=len(contradictions),
         last_memory_at=last_at,
     )

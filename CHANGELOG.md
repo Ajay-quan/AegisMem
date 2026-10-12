@@ -1,11 +1,40 @@
 # Changelog
 
+
+## 0.4.0 (2026-10-11): AegisMem, the trust layer for agent memory
+
+Merges the v0.3.0 line with the Q1 production core into one product (see `docs/adr/0005-merge-integrity-architecture.md`).
+
+**Added**
+- Integrity layer: provenance and learned trust, quarantine, read-time guard, cascading erasure with signed receipts, handoff packets.
+- Continual learning: outcome-calibrated trust, self-improving risk model (implicit benign signals), durable event-sourced learning.
+- Multi-tenancy: scoped API keys, Postgres row-level security, per-tenant rate limits, durable audit trail (`/api/v1/admin/audit`).
+- Reliability: idempotent writes, vector-index repair outbox with leased claims, pgvector single-store mode.
+- Interfaces: Python and TypeScript SDKs, MCP server, LangChain/LangGraph and OpenAI Agents tools, CLI on the SDK.
+- Operations: Prometheus alerts, Grafana dashboard, OpenTelemetry tracing, Docker, Compose, Kustomize, Helm, release workflow.
+- Evaluation: aegis-bench gates, LoCoMo recall benchmark, external injection suite, aegis-audit.
+
+**Changed**
+- Hybrid retrieval now feeds the integrity guard; defaults tuned on LoCoMo (blend 0.15, pool 2,000). Recall@5 0.565 vs 0.514 raw.
+- Ranking: utility (smoothed used-rate) replaces raw access counts (removed a popularity feedback loop).
+- Zero-infra defaults for development; production refuses in-memory stores and mock embeddings.
+- Name back to AegisMem; version from `core/version.py`.
+
+**Removed** (superseded; history at `e20ba0b`)
+- Flask demo stack (Flask app, JSON store, FAISS store, local graph, landing HTML), single-key registry, in-process audit,
+  `query_id` feedback API, stdlib SDK, the earlier MCP server, root Dockerfile, `requirements*.txt`, `push.sh`, committed `build/`.
+
+**Fixed**
+- Fresh-database test failures (`type "vector" does not exist`): `ensure_pgvector` before any `create_all`.
+- Route templates under FastAPI 0.14x (included routers report relative paths): auth scopes, metrics and audit.
+- In-memory store counted deleted memories; tests no longer read a developer's `.env`.
+
 ## [0.3.0] — hardening round 2 (security, evaluation, OSS readiness)
 
 ### Security & multi-tenancy
 - **Scoped, revocable, named API keys** (`core/security/keys.py`): configure many
-  keys via `STATEFUL_AI_API_KEYS` (`name:secret[:tenant]`), each attributable and
-  independently revocable. Backward-compatible with the single `STATEFUL_AI_API_KEY`
+  keys via `AEGISMEM_API_KEYS` (`name:secret[:tenant]`), each attributable and
+  independently revocable. Backward-compatible with the single `AEGISMEM_API_KEY`
   (maps to principal `default`). Constant-time matching; per-principal namespace
   scoping helper.
 - **Audit log** (`core/security/audit.py`, `GET /api/v1/audit`): every mutating
@@ -32,7 +61,7 @@
 ## [0.3.0] — production-readiness hardening (cleanup pass)
 
 ### Branding & versioning
-- Unified product branding around **stateful.ai** (engine name **stateful.ai**
+- Unified product branding around **AegisMem** (engine name **AegisMem**
   retained for the Python package/modules to avoid risky renames): API title,
   root response, OpenAPI metadata, MCP server name, and docs.
 - **Single source of truth for version** (`core/version.py`, `__version__=0.3.0`);
@@ -72,9 +101,9 @@
   consistency, env-aware store fallback). Suite: **149 passing**;
   `tsc --noEmit` clean.
 
-## [0.3.0] — Stateful-CL: continual learning
+## [0.3.0] — AegisMem-CL: continual learning
 
-stateful.ai becomes a *self-improving* memory system. The memory corpus is reused
+AegisMem becomes a *self-improving* memory system. The memory corpus is reused
 as a continual-learning replay buffer, and retrieval ranking now adapts online
 from feedback — disabled by default, so the zero-infra path and all prior
 behavior are unchanged. See `docs/continual_learning_design.md`.
@@ -107,12 +136,12 @@ behavior are unchanged. See `docs/continual_learning_design.md`.
   Result: EWC turns BWT ≈ **−0.64** (catastrophic forgetting) into **+0.20**
   while lifting average P@1 over the static baseline.
 - **Telemetry** (`core/observability/metrics.py`): new Prometheus series on
-  `/metrics` — `stateful_ai_feedback_total{recorded,outcome}`,
-  `stateful_ai_feedback_reward` (histogram), `stateful_ai_cl_policy_updates_total`,
-  `stateful_ai_cl_replay_interactions` / `_labeled_examples` /
-  `stateful_ai_cl_policy_namespaces` (gauges), plus retrieval-result telemetry
-  (`stateful_ai_retrieval_results_returned`, `_candidates_considered`,
-  `stateful_ai_retrieval_empty_total`). Wired into the retrieve and feedback
+  `/metrics` — `aegismem_feedback_total{recorded,outcome}`,
+  `aegismem_feedback_reward` (histogram), `aegismem_cl_policy_updates_total`,
+  `aegismem_cl_replay_interactions` / `_labeled_examples` /
+  `aegismem_cl_policy_namespaces` (gauges), plus retrieval-result telemetry
+  (`aegismem_retrieval_results_returned`, `_candidates_considered`,
+  `aegismem_retrieval_empty_total`). Wired into the retrieve and feedback
   services; degrades to no-ops when `prometheus-client` is absent.
 - **Tests**: `test_online_scorer`, `test_replay_buffer`, `test_cl_metrics`,
   `test_feedback_reward`, `test_telemetry`, and end-to-end `test_feedback`
@@ -138,7 +167,7 @@ behavior are unchanged. See `docs/continual_learning_design.md`.
 
 ### Added
 - **API-key authentication** for the FastAPI service (`apps/api/security.py`).
-  Constant-time `X-API-Key` comparison, enabled by setting `STATEFUL_AI_API_KEY`;
+  Constant-time `X-API-Key` comparison, enabled by setting `AEGISMEM_API_KEY`;
   disabled by default so the zero-infra dev path is unchanged.
 - **Per-client rate limiting.** In-process token bucket keyed by API key or
   client IP, configurable via `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`,
@@ -165,7 +194,7 @@ behavior are unchanged. See `docs/continual_learning_design.md`.
 ## [0.1.0] — Hybrid retrieval, agent-native MCP, zero-infra service
 
 This release closes the gap between what the project documented and what it
-actually ran, and adds the capabilities that make stateful.ai a credible,
+actually ran, and adds the capabilities that make AegisMem a credible,
 state-of-the-art agent memory system.
 
 ### Added

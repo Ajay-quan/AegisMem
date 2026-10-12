@@ -1,4 +1,4 @@
-"""Unit tests for the Stateful-CL online ranking policy."""
+"""Unit tests for the AegisMem-CL online ranking policy."""
 from __future__ import annotations
 
 from domain.learning.features import FEATURE_NAMES

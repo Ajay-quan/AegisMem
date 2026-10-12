@@ -65,9 +65,8 @@ class TestHealthEndpoint:
         resp = await test_client.get("/")
         assert resp.status_code == 200
         body = resp.json()
-        # Product is branded stateful.ai; stateful.ai is retained as the engine name.
-        assert body["name"] == "stateful.ai"
-        assert body["engine"] == "stateful.ai"
+        assert body["name"] == "AegisMem"
+        assert body["engine"] == "aegismem"  # package / engine identifier
 
 
 class TestIngestEndpoint:

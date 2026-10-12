@@ -1,4 +1,4 @@
-"""Core Pydantic v2 schemas for stateful.ai memory objects."""
+"""Core Pydantic v2 schemas for AegisMem memory objects."""
 from __future__ import annotations
 
 import uuid
@@ -82,9 +82,10 @@ class ImportanceLevel(str, Enum):
 
 
 class MemoryItem(BaseModel):
-    """The canonical memory record. Every memory in stateful.ai is a MemoryItem."""
+    """The canonical memory record. Every memory in AegisMem is a MemoryItem."""
 
     memory_id: str = Field(default_factory=new_id)
+    tenant_id: str = Field(default="default", description="Owning tenant (isolation boundary)")
     namespace: str = Field(..., description="Logical partition (e.g. 'user:123:agent:chat')")
     user_id: str = Field(..., description="Owner user identifier")
     agent_id: str = Field(default="", description="Agent that created this memory")
@@ -251,12 +252,16 @@ class RetrievalCandidate(BaseModel):
 class RetrievalResult(BaseModel):
     """Final retrieval result set."""
 
+    retrieval_id: str = Field(default_factory=new_id)
     query: RetrievalQuery
     candidates: list[RetrievalCandidate]
     total_found: int
+    guard_report: list[dict[str, Any]] = Field(
+        default_factory=list, description="Candidates withheld or replaced by the integrity guard",
+    )
     retrieved_at: datetime = Field(default_factory=utcnow)
     latency_ms: float = 0.0
-    # Correlation id for the Stateful-CL feedback loop: clients echo this back to
+    # Correlation id for the AegisMem-CL feedback loop: clients echo this back to
     # POST /feedback so served candidates become labeled training examples.
     # Empty when continual learning is disabled.
     query_id: str = ""

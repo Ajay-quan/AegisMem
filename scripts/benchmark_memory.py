@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Information-retrieval benchmark for stateful.ai memory recall.
+"""Information-retrieval benchmark for AegisMem memory recall.
 
 Runs a dataset of users (each with memories + gold-labeled queries) through the
 *real* ingest + retrieval stack and reports standard IR metrics
@@ -108,7 +108,7 @@ async def _main_async(args) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="stateful.ai IR recall benchmark")
+    ap = argparse.ArgumentParser(description="AegisMem IR recall benchmark")
     ap.add_argument("--dataset", default="docs/benchmarks/sample_dataset.json")
     ap.add_argument("--top-k", type=int, default=5)
     ap.add_argument("--out", default="docs/benchmarks")

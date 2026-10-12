@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-06-30T05:17:24.854873+00:00",
-  "dataset": "stateful_ai-sample-personal-memory",
+  "dataset": "aegismem-sample-personal-memory",
   "embedding_backend": "mock (deterministic)",
   "hybrid": {
     "queries": 9,

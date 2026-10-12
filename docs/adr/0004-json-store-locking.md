@@ -1,5 +1,7 @@
 # ADR 0004: JSON Store With Advisory File Locking
 
+> **Status: Superseded** by [ADR 0005](0005-merge-integrity-architecture.md) (2026-10-11). Kept for history.
+
 ## Status
 
 Accepted

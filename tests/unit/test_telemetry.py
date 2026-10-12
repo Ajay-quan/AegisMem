@@ -24,13 +24,13 @@ def test_render_includes_new_metrics_when_enabled():
 
     body = metrics.render().decode()
     for name in (
-        "stateful_ai_feedback_total",
-        "stateful_ai_feedback_reward",
-        "stateful_ai_cl_policy_updates_total",
-        "stateful_ai_cl_replay_interactions",
-        "stateful_ai_cl_replay_labeled_examples",
-        "stateful_ai_cl_policy_namespaces",
-        "stateful_ai_retrieval_results_returned",
-        "stateful_ai_retrieval_candidates_considered",
+        "aegis_feedback_total",
+        "aegis_feedback_reward",
+        "aegis_cl_policy_updates_total",
+        "aegis_cl_replay_interactions",
+        "aegis_cl_replay_labeled_examples",
+        "aegis_cl_policy_namespaces",
+        "aegis_retrieval_results_returned",
+        "aegis_retrieval_candidates_considered",
     ):
         assert name in body, f"missing metric: {name}"

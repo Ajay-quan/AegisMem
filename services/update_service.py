@@ -155,9 +155,13 @@ class UpdateService:
                 parent_memory_ids=[existing.memory_id] + existing.parent_memory_ids,
             )
 
-            # Supersede old memory
+            # Supersede old memory, and keep the index in sync so it stops matching.
             existing.supersede()
             await self._db.update_memory(existing)
+            try:
+                await self._vs.update_payload(existing.memory_id, {"status": "superseded"})
+            except Exception as e:
+                logger.warning(f"Vector status sync failed for {existing.memory_id}: {e}")
 
             # Save new version
             await self._db.save_memory(new_memory)

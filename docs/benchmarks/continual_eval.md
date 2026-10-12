@@ -1,4 +1,4 @@
-# Stateful-CL Continual-Learning Evaluation
+# AegisMem-CL Continual-Learning Evaluation
 
 Generated: 2026-06-30T01:44:28.845724+00:00
 
@@ -10,7 +10,7 @@ all tasks after each one. We report Average Accuracy (P@1), Backward Transfer
 ## Headline
 
 - Static (no learning) average P@1: **0.2675**
-- Stateful-CL (EWC) average P@1: **0.3538**  (lift vs static: **+0.0863**)
+- AegisMem-CL (EWC) average P@1: **0.3538**  (lift vs static: **+0.0863**)
 - BWT with EWC: **+0.1967**  vs  without EWC: **-0.6367**
 - Forgetting reduced by EWC: **+0.6367**
 

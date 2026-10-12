@@ -1,5 +1,5 @@
 {
-  "name": "stateful_ai-sample-personal-memory",
+  "name": "aegismem-sample-personal-memory",
   "description": "Small LoCoMo-style multi-session personal-memory set: facts/preferences per user with queries whose gold answers are specific memory ids. Bundled so the IR benchmark is runnable out of the box; swap in real LoCoMo/LongMemEval JSON via the same schema.",
   "users": [
     {

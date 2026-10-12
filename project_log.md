@@ -1,0 +1,414 @@
+# AegisMem Project Log
+
+Handover log for humans and AI agents. Read this first, then `ROADMAP.md`. Append new entries at the
+bottom, newest last. Each entry should cover what was done, why, where in the code, and what is still open.
+
+## Orientation (keep current)
+
+- **What it is:** a governed memory service for LLM agents. FastAPI app with typed memories, hybrid retrieval,
+  LLM-judged updates and contradiction checks, reflections, and an eval harness.
+- **Strategic bet (since Session 2):** the *integrity layer for agent memory*: provenance and trust, quarantine, a read-time
+  guard against revoked or superseded data, and verifiable cascading erasure with signed receipts. Handoff and continual learning sit
+  on top. It does not compete with Mem0 or Zep on recall (see `ROADMAP.md`).
+- **Layout:** `core/` (schemas, config), `domain/` (pure logic: scoring, reranker, learning, evaluator),
+  `services/` (orchestration), `adapters/` (LLM, embeddings, Postgres/Qdrant/Neo4j), `apps/api` (FastAPI routes and DI).
+- **Run tests:** `.venv/bin/python -m pytest -q` from `aegismem/`. Mock backends are used and no services are needed.
+- **Repo:** git root is `aegismem/` (remote `github.com/Ajay-quan/AegisMem`). The parent folder holds PDFs, screenshots and a tarball, which are not code.
+- **Conventions:** async services; stores are injected; tests use `tests/fixtures/conftest.py::MockPostgresStore`;
+  scoring weights come from `core/config/settings.py`.
+
+## Log
+
+### 2026-10-10 · Session 1: Review, roadmap, Phase 1 features
+
+**Interaction:** The user asked for a repo review and a merit assessment. Then they asked for a startup-grade plan
+focused on novelty, easier context handoff, small real problems a basic user hits, and continual learning,
+plus this log file.
+
+**Assessment:** The architecture is solid, but the feature set overlaps Mem0, Zep and Letta. Differentiation must come
+from handoff, truth maintenance and learning, proven with benchmarks. Baseline: 58 tests passing.
+
+**Built:**
+1. `ROADMAP.md`: positioning, a table of 10 "unnoticed problems" mapped to features, a 3-layer continual-learning
+   strategy (retrieval weights, then memory utility priors, then procedural learning; model weights stay frozen), and phases P1 to P3.
+2. **Handoff packets**: `services/handoff_service.py`, `POST /api/v1/handoff`.
+   - Priority-ordered sections: open_questions, recent_changes (shows the previous value through
+     `parent_memory_ids[0]`), profile (semantic layer or fact/procedure/reflection/summary), task_relevant (hybrid
+     retrieval), recent_activity.
+   - Token budget (estimated at about 4 chars per token), dedupe across sections, per-section cap, `omitted` counts, `since` filter,
+     and markdown output with `[memory_id[:8]]` citations. Deterministic, with no LLM calls.
+3. **Continual learning v1**:
+   - `domain/learning/weight_learner.py`: `OnlineWeightLearner` is per-user online logistic SGD over the signals
+     (semantic, recency, importance, access). Guardrails: `min_events=20` before it is served, L2 pull toward the defaults,
+     a floor of 0.05 and renormalisation to sum to 1, plus a per-user reset.
+   - `services/feedback_service.py`: `RetrievalLedger` is an LRU of the signals scored for each `retrieval_id`.
+     `FeedbackService.submit` validates the user, memory ids and one-time use; updates
+     `retrieval_count` and `successful_retrieval_count`; and trains the learner.
+   - `RetrievalResult.retrieval_id` was added (`core/schemas/memory.py`). `RetrievalService` now takes optional
+     `learner` and `ledger` and scores with learned weights when they are active (`score_memory_for_retrieval(weights=...)`).
+   - Endpoints: `POST /api/v1/feedback`, `GET` and `DELETE /api/v1/learning/{user_id}`. `/retrieve` now returns `retrieval_id`.
+   - DI: module-level `_learner` and `_ledger` singletons in `apps/api/dependencies.py`.
+4. Tests: `tests/unit/test_learning.py`, `tests/unit/test_handoff.py`, `tests/api/test_handoff_feedback_api.py`.
+   Total is 69 passing.
+
+**Known gaps and next steps (priority order):**
+- Learner state and the ledger are **process-local**. They are lost on restart and not shared across workers. Next step: a Postgres
+  table for feedback events and user weights (an Alembic migration), plus a `LearningStore` protocol implementation.
+- Build an offline replay evaluator: replay logged feedback and compare MRR and recall@k for learned vs. default weights. This gates turning learning on by default.
+- Handoff scans up to 500 active memories per call, which is fine for now. It needs indexed queries (by status or contradiction, and by `updated_at`) at scale.
+- `access` signal normalisation is duplicated in `scoring.compute_composite_score` and `RetrievalLedger.record`. Extract a shared helper.
+- Repo hygiene: there is no `.gitignore`. `__pycache__`, `.DS_Store` and `.env` are tracked. The current `.env` has only placeholder or local values,
+  but it should still be untracked. This has not been changed yet and needs the owner's approval.
+- After that: the P2 items in `ROADMAP.md` (score explanations, validity windows, memory inbox, PII, SDK).
+
+### 2026-10-10 · Session 2: Pivot to "integrity layer for agent memory"
+
+**Interaction:** The user does not want a Mem0 lookalike and asked for internet research into the space to find a new niche, and
+then to start building. "Top 1000" was not literally feasible. I ran targeted searches over the vendor landscape (Mem0, Zep, Letta,
+Cognee, Supermemory, LangMem, SurrealDB), 2026 arXiv work on memory security, governance and erasure, and multi-agent handoff.
+
+**Findings → decision:** Recall is commoditised. Unsolved in products: memory poisoning and provenance laundering, revoked facts
+still being served, and unverifiable deletion (GDPR). Only fragments exist (SurrealDB enterprise forget, the Attestari OSS package,
+the SuperLocalMemory paper). **New positioning: the trust and compliance layer for agent memory.** See `ROADMAP.md`, which was rewritten.
+
+**Bugs found in AegisMem itself (all fixed):**
+1. *Revoked-but-authoritative:* superseded memories kept `status=active` in the vector payload and were served. A repro returned
+   only the old address. The fix is the read-time guard plus a status sync on supersede (`VectorStore.update_payload`).
+2. *Silent result loss:* negative cosine similarity failed the `semantic_score>=0` validation, and the candidate was swallowed. Now clamped
+   in `score_memory_for_retrieval`.
+3. *Qdrant ids from `hash()`:* these are salted per process, so ids changed on restart and deletes missed. Now `uuid5` (`_point_id`).
+   **Existing Qdrant collections need re-indexing.**
+4. *Delete was soft:* content and vectors were retained. A new `purge_memory` hard-deletes the row and its contradiction rows.
+
+**Built:**
+- `domain/integrity/provenance.py`: trust by source, non-amplification (`derived_trust`), and injection heuristics with a quarantine rule
+  (trust < 0.7 and instruction-like). Stored in `metadata["provenance"]` and `metadata["quarantine"]`.
+- `services/ingest_service.py::_provenance`: attaches provenance; callers may lower trust but never raise it; quarantined memories get `status=pending`.
+- `services/guard_service.py::MemoryGuard`: canonical re-check of every candidate. It serves, replaces with a successor (via `superseded_by` /
+  `merged_into` pointers or the `parent_memory_ids` index), or withholds (erased, owner mismatch, quarantined, expired, trust floor).
+  It is always on in `RetrievalService`. `RetrievalResult.guard_report` and the `/retrieve` response explain what was withheld.
+- `services/erasure_service.py`: `forget` computes the closure (requested, prior_version, derived, duplicate with cosine ≥ 0.95), purges from
+  the relational, vector and graph stores, re-verifies each store, and issues an HMAC-signed receipt with keyed-HMAC fingerprints (no content).
+- Contradiction temporal supersede now records `superseded_by`. Graph store has `delete_memory_node` and `has_memory_node`.
+- API: `POST /forget`, `GET /receipts/{id}`, `POST /receipts/verify`, `GET /quarantine/{user_id}`, `POST /quarantine/{id}/release?user_id=`.
+- Tests: `tests/unit/test_integrity.py`, `tests/api/test_integrity_api.py`. Total is **83 passing**.
+
+**Open / next (priority):** persist receipts, quarantine, learner and ledger (all currently in-process); build `scripts/integrity_audit.py`
+(the backend-agnostic audit is the go-to-market wedge); add signed handoff packets with per-item provenance; Ed25519 receipts; a pgvector-only mode.
+Known limits:
+- The injection detector is regex-based (precision and recall are unmeasured), so an eval set is needed.
+- `PostgresStore.update_memory` does not persist `parent_memory_ids` or `valid_to` changes.
+- Erasure doesn't cover backups (stated in the receipt) or the `facts` / `reflections` tables.
+- The successor index scans up to 1000 active memories.
+
+### 2026-10-10 · Session 3: Continual learning from outcomes (calibrated trust)
+
+**Interaction:** The user asked for a "very VERY useful" continual-learning integration and to start immediately.
+
+**Decision:** The most valuable signal is the human decisions the product already collects (quarantine approve/reject,
+corrections, confirmations, usage). The system learns *which sources and origins to believe*. That compounds with the integrity niche:
+fewer items need review over time, poisoned origins get shut out deployment-wide, and the effect is retroactive.
+
+**Built:**
+- `domain/learning/trust_calibrator.py`: `TrustCalibrator` keeps a Beta posterior per `source` and per `source|origin`. Origins
+  shrink toward their source (a new origin starts at the source's *learned* trust). The source learns at half rate when an origin is known.
+  Event weights are in `EVENT_WEIGHTS` (reject β+4, release α+2, corrected β+2, confirmed α+1, used α+0.25). Prior strength k=10,
+  with source priors from `SOURCE_TRUST`. `InMemoryTrustStore` is process-local.
+- Ingest (`IngestionService(trust_calibrator=...)`): trust is the calibrated value for `(source, origin)`. `origin` comes from
+  `metadata.origin` or `metadata.provenance.origin`, is stored in `metadata.provenance.origin`, and stays capped by the caller-supplied trust.
+- Guard (`MemoryGuard(trust_calibrator=...)`): `effective_trust = min(stored, live learned)`, so learned distrust is retroactive.
+  The default floor is `settings.guard_min_trust = 0.2`. `servable` is now **async**.
+- `services/outcome_service.py`: `OutcomeService.correct(kind=wrong|outdated, corrected_text)` supersedes the memory, links
+  `superseded_by` to the replacement, penalises the origin only for `wrong`, and flags transitively derived memories
+  (`contradiction_status=suspected`, confidence halved). It also has `confirm`, `release` (now used by the existing release endpoint) and
+  `reject` (penalise plus erase with a receipt).
+- `FeedbackService` records `used` for the origin of each used memory.
+- API: `POST /corrections`, `POST /memories/{id}/confirm?user_id=`, `POST /quarantine/{id}/reject?user_id=`,
+  `GET /trust/sources` (least-trusted first). DI: the `_calibrator` singleton is injected via `Depends(get_calibrator)`
+  into the ingest, retrieve (guard), feedback and outcome services, so tests can override it.
+- Tests: `tests/unit/test_trust_learning.py` (retroactive distrust, origin isolation, release builds trust, wrong vs outdated,
+  blast radius, cross-user protection) and an API test in `tests/api/test_integrity_api.py`. Total is **92 passing**.
+
+**Known limits / next:**
+- Calibrator state is in-process and should be persisted with the other learning state.
+- Trust is per deployment. Per-tenant scoping is needed for multi-tenant SaaS (key prefix by tenant).
+- Event weights are hand-set. Fit them from reviewer data once it exists.
+- `used` events could be gamed by a compromised agent. Consider capping the positive mass from `used` per origin per day.
+- Add a time decay so origins can recover, and an audit trail of trust changes (who or what moved it).
+
+### 2026-10-10 · Session 4: Self-improving write-risk model (continual learning #2)
+
+**Interaction:** The user set a standing persona (world-class AI-startup PM plus top engineer) and repeated the request for a very useful
+continual-learning integration. Saved as a memory preference.
+
+**Product rationale:** Calibrated trust (Session 3) learns *who* to believe. Screening *what* gets held was still a fixed regex,
+and reviewer workload (false positives) and missed attacks (false negatives) are the core cost and liability of a HITL product.
+So reviewer decisions now train the screener.
+
+**Built:**
+- `domain/learning/risk_model.py`: `OnlineRiskModel` uses crc32-hashed word unigrams and bigrams (2^18 dims), AdaGrad logistic regression
+  with L2, and a seed corpus (`SEED_MALICIOUS`/`SEED_BENIGN`) for cold start. `threshold(trust) = 0.5 + 0.4·trust + precision_adjust`,
+  where precision_adjust = (0.5 − precision of model-held items) × 0.4 after 5 or more reviewed holds, clamped to [0.2, 0.95]. `score()` returns
+  the probability, threshold, flag and top positive features (stopwords excluded) for explanations. `stats()` backs `GET /api/v1/risk-model`.
+- Ingest: rule check first (`trigger: "rule"`), then the model (`trigger: "model"`, reason plus `features`). `metadata.risk = {p, threshold}`
+  is stored on every write.
+- `OutcomeService`: release and confirm train benign, reject trains malicious (before erasure). The new correction kind **`malicious`**
+  covers an attack that slipped through: it penalises the origin like a rejection, trains the model, increments `missed_attacks`, and erases the memory
+  plus duplicates and derivatives with a receipt. This is the only path by which recall improves.
+- DI: the `_risk_model` singleton is injected via `Depends(get_risk_model)` into the ingest and outcome services.
+- Route note: the stats endpoint is `/risk-model`, not `/learning/risk-model`, because `/learning/{user_id}` would capture that path.
+- Tests: `tests/unit/test_risk_model.py` covers cold start, recall gained from missed-attack reports (a new variant from an unseen
+  origin gets held), false positives dropping after releases, threshold self-tuning both ways, explainability and determinism. Total is **102 passing**.
+
+**Observations / limits:**
+- At cold start, "Our refund policy changed: refunds are never allowed" (tool output) is held at p = 0.76. That may be a false positive
+  for support bots. The release loop corrects it per deployment, but the seed corpus needs real-world tuning and a held-out eval set.
+- The model is per deployment, in-process and unpersisted, like the other learning state. **Persisting all learning state is now the #1 P1 gap.**
+- Reviewer-poisoning risk: a malicious reviewer could release attacks to train them in. Add an audit trail and per-reviewer weighting later.
+- Bag-of-n-grams is easy to evade with paraphrases. A small embedding-based head (using the existing embedding backend) is the upgrade path.
+
+### 2026-10-10 · Session 5: 12-month product plan
+
+**Interaction:** The user wants production-grade solutions, not demos or small-scale ones, and asked for a full one-year plan for incrementally
+expanding scope and usefulness.
+
+**Output:** `PRODUCT_PLAN_12M.md` (Nov 2026 – Oct 2027). It covers the thesis, ICP and personas, principles, quarterly epics with exit criteria,
+the continual-learning plan with safety gates, KPIs and the north star, GTM and pricing hypotheses, the team plan, risks, and a 30-day sprint. Scope path:
+memory integrity → gateway for any memory store → compliance-grade governance (crypto-erasure, DSAR, SOC 2) → context integrity platform plus a
+cross-tenant threat network (the moat).
+
+**Implication for engineering:** the next work is Q1 "production core" and starts with durable, tenant-scoped, event-sourced learning
+state (remove the in-process singletons in `apps/api/dependencies.py`), auth, pgvector mode, the outbox sync and `aegis-bench`. No new
+features until that lands. An open decision for the founders is hosted-first vs self-host-first (recommendation: hosted, with a VPC option).
+
+### 2026-10-10 · Session 6: Q1 execution, checkpoints CP0–CP4 (branch `q1/production-core`)
+
+**Interaction:** The user asked to start Q1 work immediately, in professional checkpoints, with a progress percentage and a full update at the end.
+
+**Environment notes:**
+- Docker was not running and there was no local Postgres. SQL code is tested on SQLite through the same SQLAlchemy async path. Postgres is
+  covered by CI (`.github/workflows/ci.yml` runs the Postgres 16 service, the alembic round-trip and the integration tests against it), but **CI has not run yet**
+  because nothing has been pushed.
+- The venv was moved from another path, so `.venv/bin/pip` has a broken shebang. Use `.venv/bin/python -m pip`.
+- `greenlet` was missing, which made every async SQLAlchemy call fail. That means `PostgresStore` had never worked in this venv. It is now a declared dependency.
+
+**Checkpoints (git commits):**
+- `505cdf7` CP0: committed sessions 1–5 and repo hygiene (.gitignore; untracked `__pycache__`, `.DS_Store`, `.env`).
+- `59af93f` CP1: durable learning state. Components are deterministic state machines (`apply`/`to_state`/`from_state`).
+  `services/learning_runtime.py` handles append → catch-up replay, so replicas converge, plus snapshots every 200 events and `rebuild`.
+  `adapters/relational_store/control_store.py` + `control_models.py` hold the event log, snapshots, receipts, ledger (atomic consume) and API keys.
+  The risk model uses tenant-keyed BLAKE2b feature hashing, and **its events store no plaintext**. Alembic env plus migration 0001.
+- `71bdac7` CP2: multi-tenancy and auth.
+  - `apps/api/auth.py`: API keys (peppered HMAC), 5 scopes, router-level `authorize` that **fails closed** on unmapped routes (a test
+    enforces that every route is mapped).
+  - `adapters/tenancy.py`: scoped memory and vector stores applied in DI. Methods are allow-listed, and cross-tenant access looks like a 404.
+  - Admin key API plus `scripts/aegisctl.py`.
+  - Boot guards: staging and production require auth, a real secret, a pepper and live stores.
+  - **Fixed silent data loss in `PostgresStore`:** `memory_layer`, `contradicted_by` and the retrieval counters were never persisted, and
+    `update_memory` dropped `parent_memory_ids`, `valid_to`, `confidence` and `tags`. Migration 0002 adds the columns and backfills the layer.
+- `89bf5c9` CP3: `bench/` (aegis-bench).
+  - Held-out dataset `bench/datasets/injection_v1.jsonl` (52 rows).
+  - Suites: poisoning, learning (8-seed mean), revocation, erasure and latency, with gates in `bench/thresholds.json` and pytest gate tests.
+  - Learning fixes the bench found: `SOURCE_SPILLOVER` 0.5→0.1, `INHERIT_FLOOR` 0.8, experience replay against seed anchors, and cost-asymmetric
+    threshold tuning. Decision rationale: at production base rates FPR dominates reviewer cost, so the FPR-conservative config was chosen.
+  - Heavy dependencies moved to extras.
+- `6edf116` CP4: `sdk/python` (`aegismem-client`), whose retry policy never re-sends a state-creating write that may have reached the server.
+  Prometheus `/metrics` (no ids in labels), `/ready` probe, and the ingest response now exposes quarantine status.
+
+**Bench baseline (`python -m bench.run`):**
+- poisoning: recall 0.58 (rules-only 0.125), FPR 0.107, user-message FP 0.
+- learning: recall 0.57→0.78, FPR +0.018.
+- revocation: 0 leaks across 7 scenarios.
+- erasure: 0 residue, cascade recall 1.0.
+- screening p95 0.05 ms, guard p95 0.04 ms.
+
+**Tests:** 136 passing.
+
+**Q1 progress tracker (engineering):**
+
+| Epic | % | Remaining |
+|---|---|---|
+| Durable state | 90 | Postgres verification in CI; scheduled ledger pruning |
+| Multi-tenancy & auth | 75 | Postgres RLS, per-tenant rate limits/quotas, graph tenant stamping, backfill script for pre-tenancy vector payloads |
+| Single-store mode (pgvector, Helm) | 0 | all |
+| Async pipeline / outbox | 0 | all (also server-side Idempotency-Key for ingest) |
+| Observability | 60 | OpenTelemetry tracing, Grafana dashboards and alerts in Helm |
+| Eval & benchmarks | 65 | public injection datasets, LongMemEval/LoCoMo recall-impact suite, multilingual |
+| SDKs + MCP | 35 | TypeScript SDK, MCP server, LangGraph/OpenAI Agents SDK integrations |
+| OSS Integrity Audit CLI | 0 | all |
+| **Q1 engineering overall** | **≈41%** | |
+
+**Next (recommended order):** push the branch and get CI green on Postgres → pgvector single-store mode → outbox + idempotent ingest →
+OSS audit CLI (GTM wedge) → MCP server and TS SDK → RLS and rate limits → OTel.
+
+### 2026-10-10 · Session 7: Q1 continued, CP5–CP12 (branch `q1/production-core`, not pushed)
+
+**Interaction:** The user asked to continue the development completely. The push was not authorized, so all work is in local commits.
+
+**Checkpoints:**
+- `02bd8da` CP5, single-store mode:
+  - `adapters/vector_store/pgvector_store.py` (HNSW cosine; SQLite fallback for dev), `NullGraphStore`.
+  - Settings `vector_backend`/`graph_backend`, migration 0003.
+  - Vector-store **conformance kit** (`tests/integration/test_vector_store_contract.py`).
+  - CI image `pgvector/pgvector:pg16`.
+- `ee5bba1` CP6, reliable writes:
+  - `apps/api/idempotency.py` (Stripe semantics) on ingest, batch, corrections and forget.
+  - `services/vector_sync.py`: `ResilientVectorStore` + `OutboxWorker`. Failed index ops are queued with ids only, retried with backoff and dead-lettered. Erasure cancels pending repairs.
+  - The SDK sends a stable auto Idempotency-Key. Migration 0004.
+  - **Security fix:** `/ingest/batch` ignored per-item `source_type`, which let tool output bypass screening.
+- `2b7888b` CP7, `audit/` (`aegis-audit`):
+  - Seven checks: REV-1, DEL-1..3, POI-1..2, ISO-1.
+  - Targets: AegisMem, Mem0 REST (**unverified against a live Mem0**), and a naive reference.
+  - The naive reference scores 1/7; AegisMem scores 7/7 through HTTP.
+- `31fd03d` CP8, `integrations/mcp`: stdio JSON-RPC MCP server with remember/recall/handoff/correct/used/forget. Tested via a real subprocess.
+- `697954c` CP9:
+  - `sdk/typescript` (`@aegismem/client`), strict tsc.
+  - `MEMORY_BACKEND=memory` Docker-free dev mode.
+  - A pytest boots uvicorn and runs the TS e2e against it.
+- `b40cc78` + `73b4431` CP10, platform hardening:
+  - Per-tenant rate limits (`apps/api/ratelimit.py`; Redis Lua or in-process; off by default in tests via conftest).
+  - **Postgres RLS:** migration 0005 plus `core/tenancy_context.py`. The tenant is bound per transaction through `set_config`; `system_context()` is used for cross-tenant jobs. An AST test guarantees every wrapper call is tenant-bound.
+  - **Superusers bypass RLS**, so boot refuses a superuser or BYPASSRLS app role in prod (`REQUIRE_RLS`).
+  - OpenTelemetry (`core/observability/tracing.py`; W3C propagation, no content in attributes).
+- `65f4f1a` CP11, deployment:
+  - Hardened multi-stage Dockerfile.
+  - Single-store compose with owner/app roles and a migrate gate.
+  - Kustomize base and production overlay (verified with `kubectl kustomize`). Helm is not used yet.
+  - Deployment invariant tests and `docs/DEPLOYMENT.md`.
+- `2262f25` CP12: hourly pruning of the ledger and idempotency records, `aegisctl prune`, and `aegisctl backfill-tenant` for Qdrant (**untested, no Qdrant server locally**).
+- README rewritten for the integrity positioning.
+
+**Verification status:**
+- 168 tests passing, plus 3 skipped (Postgres RLS ×2 and the shared Redis limiter need CI services).
+- Bench gates pass with unchanged numbers. TS typecheck passes. Compose config and Kustomize render validate.
+- **Not verified:** Docker image build (daemon down), the Postgres/Redis paths (they run only in CI and CI has never run), the Mem0 adapter, and the Qdrant backfill.
+
+**Q1 engineering tracker (updated):**
+
+| Epic | % | Remaining |
+|---|---|---|
+| Durable state | 95 | first CI run on Postgres |
+| Multi-tenancy & auth | 95 | graph-node tenant stamping; CI verification of RLS |
+| Single-store mode & deploy | 85 | build and run the image; Helm chart (Kustomize ships today) |
+| Async pipeline / outbox | 85 | `FOR UPDATE SKIP LOCKED` for multi-replica workers (currently duplicate-safe, not exclusive); retire the legacy Celery worker |
+| Observability | 85 | Grafana dashboards JSON; alert rules as code |
+| Eval & benchmarks | 65 | public injection datasets, LongMemEval/LoCoMo recall-impact suite with a real embedding model, multilingual |
+| SDKs + MCP | 85 | LangGraph / OpenAI Agents SDK integrations; publish to PyPI/npm |
+| OSS integrity audit | 85 | verify the Mem0 adapter live; publish results responsibly |
+| **Q1 engineering overall** | **≈85%** | (design-partner recruiting is non-engineering and not counted) |
+
+**Next:**
+1. Push and get CI green (Postgres, pgvector, RLS and Redis paths).
+2. Build and smoke-test the image with compose.
+3. Public-benchmark suite with real embeddings.
+4. Framework integrations.
+5. Publish the SDKs and the audit.
+
+### 2026-10-10 · Session 8: Q1 completed (CP13 onward), verified on real infrastructure
+
+**Interaction:** The user asked to complete Q1 to 100%. Docker Desktop was started locally to verify against real services. Test
+containers, a kind cluster, Homebrew tools (helm, kind, actionlint), and the Ollama model `nomic-embed-text` were added to the machine.
+Still **not pushed**: pushing needs the user's approval, and publishing needs their registry credentials.
+
+**Verification infrastructure used:** Postgres 16 + pgvector (Docker, :55432), Redis 7 (:56379), Qdrant 1.17 (:56333),
+Ollama `nomic-embed-text` (768-d), a Docker Compose stack in staging config (:58000), and a kind cluster with Helm.
+
+**Critical bugs found only by real infrastructure (all fixed):**
+1. Qdrant `search()` was removed in the current qdrant-client, so **every Qdrant retrieval failed**. Moved to `query_points`.
+2. The embedding factory never implemented `openai`/`voyage`, and **production silently used mock vectors** when no LLM key was set.
+   There is now an OpenAI-compatible backend; mock is dev-only; a boot dimension probe was added.
+3. **Ranking cost 28 points of recall** (LoCoMo recall@5 was 0.262 vs 0.540 for raw search). The cause was an access-count popularity feedback loop
+   plus query-independent weights. Raw access was replaced with utility, and the defaults are now relevance-dominant. Result: **0.521 vs 0.514 raw**.
+4. Migrations in the container crashed because newer SQLAlchemy defaults `postgresql://` to psycopg3. The driver is now pinned.
+5. Helm: the pre-install hook referenced a not-yet-created ServiceAccount, and the install hung.
+6. Kubernetes service links (`POSTGRES_PORT=tcp://…`) broke settings. Fixed with `enableServiceLinks: false`.
+7. Model and migration drift on the HNSW index.
+8. Risk-model selection bias (labels only for held items) produced 20% FPR after learning. Implicit benign signals from used memories fixed it (FPR 0.07).
+
+**Built:**
+- Exclusive outbox claims (`FOR UPDATE SKIP LOCKED` + lease). Graph nodes carry tenant_id.
+- Alert rules (8, promtool-validated) and a Grafana dashboard (12 panels), provisioned in compose and verified live.
+- Helm chart `infra/helm/aegismem`, installed and upgraded on kind.
+- `bench/locomo.py` (recall impact with real embeddings) and the external deepset dataset suite (EN+DE, gated).
+- The tool catalogue was moved into the SDK (`aegismem_client.tools`).
+- `integrations/frameworks`: LangChain/LangGraph tools plus `handoff_node`, and OpenAI Agents SDK FunctionTools.
+- aegis-audit `mem0-lib` target. Results: Mem0 OSS 2.2.1 scores 5/7 (infer) and 4/7 (no infer); AegisMem scores 7/7 under compose and Helm.
+- Release automation (`release.yml`): PyPI OIDC, npm provenance, a multi-arch GHCR image with SBOM, and a Helm OCI chart. All packages pass `twine check --strict`.
+- Image slimmed from 841 to 584 MB. The no-op Celery worker was retired.
+
+**Final verification:**
+- 205 tests passed with 0 skipped, on live Postgres, Redis and Qdrant.
+- All bench gates pass.
+- Migrations are clean on Postgres and SQLite.
+- `helm lint --strict` and actionlint pass.
+- The audit scores 7/7 on compose and on Helm.
+- RLS was proven in the deployed database: app role with no or a foreign tenant sees 0 rows; it cannot run DDL.
+
+**Q1 engineering tracker: 100%.** Every Q1 epic in `PRODUCT_PLAN_12M.md` is implemented and verified. What remains is not engineering:
+
+| Item | Owner / blocker |
+|---|---|
+| Push branch, open PR, first GitHub CI run | needs the user's approval |
+| First release (tag `v0.1.0`) | user: configure PyPI trusted publishers + `NPM_TOKEN` |
+| Publish Mem0 audit results | responsible disclosure to Mem0 first |
+| Design partners (3–5) | founder-led sales |
+| Unexplained one-off: first live-PG run had 16 fixture errors that never recurred in 8+ runs | watch in CI |
+
+**Local cleanup notes:**
+- Test containers: `aegis-test-pg`, `aegis-test-redis`, `aegis-test-qdrant`.
+- Compose project: `aegis-smoke`.
+- kind cluster: `aegis`.
+- Isolated Mem0 venv: in the session scratchpad.
+
+### 2026-10-11 · Session 9: Merged `main` (v0.3.0 "stateful.ai" line) into `q1/production-core`
+
+**Interaction:**
+- PR #1 (`q1/production-core` → `main`) was opened by the user. GitHub reported it not mergeable: `main` had 7 newer commits (the user's own, made in parallel: rebrand to stateful.ai, v0.2–0.3), 343 files changed, 22 conflicts.
+- The user decided the name is **AegisMem** and left the technical calls to me.
+
+**Approach:**
+- Merged `main` into the branch with no force-push and no history rewrite.
+- Q1 is the backbone for conflicted files. `main`'s non-duplicative capabilities were ported, duplicates consolidated, and retired code stays in history at `e20ba0b`.
+- Rationale is recorded in `docs/adr/0005-merge-integrity-architecture.md`; ADRs 0001–0004 are marked superseded.
+
+**Ported from main:**
+- BM25 + RRF hybrid retrieval as a candidate stage before the guard.
+- Cross-encoder option.
+- PII redaction at ingest, before screening and embedding.
+- Security headers, a 413 body limit, the error envelope.
+- `/stats`.
+- Retrieval and feedback telemetry (renamed `aegis_*`).
+- Zero-infra dev defaults with `relational_store`/`strict_stores` aliases.
+- EWC policy, replay buffer and BWT/FWT modules kept as an evaluation harness.
+- The CLI, rewired to the SDK.
+- The Next.js landing site, rebranded.
+- The audit trail, made **durable and tenant-scoped** (`audit_events`, migration 0006, `GET /api/v1/admin/audit`).
+
+**Retired (superseded):**
+- Flask demo stack: Flask app, JSON store, FAISS store (sync, pickle metadata), local graph, cache index, landing HTML.
+- Single-key registry and in-process audit.
+- `query_id` feedback.
+- Stdlib SDK and main's MCP server.
+- Root Dockerfile, `requirements*.txt`, `push.sh` (which auto-pushed to main), committed `build/`, `architecture.drawio`.
+
+**Measured decisions:**
+- LoCoMo, full dataset with real embeddings: hybrid blend 0.15 with pool 2,000 gives recall@5 **0.565 vs 0.514** raw (+5.1 pts).
+- Main's defaults (pool 200) scored 0.418, because BM25 only saw the newest 200 memories. Defaults are now set accordingly.
+
+**Bugs found and fixed during the merge:**
+1. **The "unexplained one-off" from Session 8 is solved.** On a fresh Postgres, `create_all` ran before the vector extension existed. `ensure_pgvector()` now runs in every schema path.
+2. **FastAPI 0.143** (what production installs) reports included-router routes with *relative* paths. That broke admin scopes, metrics labels and the audit trail. The route-scope coverage test had become **vacuous** (it walked `app.routes`, which no longer exposes routers).
+   - Fix: `apps/api/routing.route_template()` reconstructs the full template from public data.
+   - The coverage test now enumerates the OpenAPI schema and asserts at least 25 routes were checked.
+   - The local venv was upgraded to match production.
+3. The in-memory store counted deleted memories (Postgres doesn't). Fixed.
+4. **Tests read the developer's `.env`.** The local `.env` set `sentence_transformers`/`bge-large`. Tests now set `AEGIS_ENV_FILE=""`, and the suite went from ~40 s to ~16 s.
+5. Deployments relied on old defaults. Compose, Kustomize and Helm now declare `MEMORY_BACKEND` explicitly, with a test enforcing it.
+6. `.env.example` documented settings that don't exist. It was rewritten, and a test now enforces that every key is a real setting.
+
+**Verification:**
+- 253 passed locally (+4 skipped live-service tests).
+- **281 passed** with Postgres + pgvector, Redis and Qdrant on a **fresh database** (twice).
+- All bench gates pass. Migrations 0001→0006 are clean on Postgres and SQLite.
+- Compose stack on FastAPI 0.143: ready; aegis-audit **7/7**; durable audit trail and `/stats` verified.
+- `helm lint --strict` passes. Version is **0.4.0**, and no "stateful.ai" references remain.

@@ -1,13 +1,13 @@
-# stateful.ai — Elite Upgrade Dossier
+# AegisMem — Elite Upgrade Dossier
 
-A senior-level diagnosis of stateful.ai and the roadmap to take it from a strong
+A senior-level diagnosis of AegisMem and the roadmap to take it from a strong
 portfolio project to a research-grade, production-grade, adoption-ready
 open-source memory system. This document is deliberately honest: it challenges
 the existing design rather than flattering it.
 
 ---
 
-## 1. Diagnosis — what stateful.ai is today
+## 1. Diagnosis — what AegisMem is today
 
 A persistent memory layer for long-running LLM agents with a genuinely clean
 spine: `API → services → domain → adapters`, every backend behind a swappable
@@ -99,7 +99,7 @@ flowchart TD
     RET --> STORES[(Relational | Vector | Graph)]
     RET --> CACHE[(Embedding + result cache)]
     GW --> FB[Feedback] --> CL
-    subgraph CL [Stateful-CL learning plane - background]
+    subgraph CL [AegisMem-CL learning plane - background]
       BUF[(Replay buffer)] --> L1[online ranker]
       BUF --> L2[LoRA reranker + replay + EWC]
       BUF --> L3[embedding heads]

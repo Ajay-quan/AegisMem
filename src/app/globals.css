@@ -2881,7 +2881,7 @@ select {
 }
 
 /* ------------------------------------------------------------------ */
-/* stateful.ai logo — four-petal pinwheel mark, blooms and spins on hover */
+/* AegisMem logo — four-petal pinwheel mark, blooms and spins on hover */
 /* ------------------------------------------------------------------ */
 
 .stateful-logo {
@@ -2968,7 +2968,7 @@ select {
   transform: translateX(0.05em);
 }
 
-/* Anthropic-style scroll morph: "stateful.ai" condenses to "st.ai" on scroll */
+/* Anthropic-style scroll morph: "AegisMem" condenses to "st.ai" on scroll */
 .stateful-logo-mid {
   display: inline-block;
   max-width: 4em;

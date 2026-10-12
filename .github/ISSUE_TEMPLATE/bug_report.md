@@ -15,7 +15,7 @@ What you expected instead.
 Steps or a minimal snippet (curl / SDK / CLI) that triggers it.
 
 **Environment**
-- stateful.ai version (`GET /health` → version):
+- AegisMem version (`GET /health` → version):
 - Python version:
 - Stores: `RELATIONAL_STORE` / `VECTOR_STORE` / `GRAPH_STORE`:
 - Embedding backend:

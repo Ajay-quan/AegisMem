@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Continual-learning evaluation harness for Stateful-CL.
+"""Continual-learning evaluation harness for AegisMem-CL.
 
 This is the *promotion gate* and the evidence that the online ranking policy
 (`domain.learning.online_scorer.OnlineRankingPolicy`) genuinely learns over a
@@ -117,7 +117,7 @@ def _run_arm(name, *, tasks, learn, ewc, base_weights, lr, ewc_lambda,
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Stateful-CL continual-learning eval")
+    ap = argparse.ArgumentParser(description="AegisMem-CL continual-learning eval")
     ap.add_argument("--tasks", type=int, default=4)
     ap.add_argument("--pool", type=int, default=8, help="candidates per query")
     ap.add_argument("--train-steps", type=int, default=300)
@@ -180,7 +180,7 @@ def main() -> int:
 def _render_markdown(report: dict) -> str:
     h = report["headline"]
     lines = [
-        "# Stateful-CL Continual-Learning Evaluation",
+        "# AegisMem-CL Continual-Learning Evaluation",
         "",
         f"Generated: {report['generated_at']}",
         "",
@@ -192,7 +192,7 @@ def _render_markdown(report: dict) -> str:
         "## Headline",
         "",
         f"- Static (no learning) average P@1: **{h['static_avg_accuracy']}**",
-        f"- Stateful-CL (EWC) average P@1: **{h['cl_ewc_avg_accuracy']}**  "
+        f"- AegisMem-CL (EWC) average P@1: **{h['cl_ewc_avg_accuracy']}**  "
         f"(lift vs static: **{h['lift_vs_static']:+}**)",
         f"- BWT with EWC: **{h['cl_ewc_bwt']:+}**  vs  without EWC: **{h['cl_no_ewc_bwt']:+}**",
         f"- Forgetting reduced by EWC: **{h['ewc_forgetting_reduction']:+}**",

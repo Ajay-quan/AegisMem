@@ -1,122 +1,67 @@
-"""Tests for API-key auth, rate limiting, security headers, and stats."""
+"""HTTP hardening: security headers, no-store, body limits, stats, durable audit trail.
+(Authentication, scopes and rate limits are covered in test_auth_tenancy.py / test_rate_limit.py.)"""
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from apps.api.main import app
-from apps.api import security
-from apps.api.dependencies import get_db_store, get_vector_store, get_graph_store
-from core.config import settings
-from tests.fixtures.conftest import MockPostgresStore
-from adapters.vector_store.qdrant_store import InMemoryVectorStore
 from adapters.graph_store.neo4j_store import MockGraphStore
+from adapters.relational_store.memory_store import InMemoryMemoryStore
+from adapters.vector_store.qdrant_store import InMemoryVectorStore
+from apps.api import dependencies as deps
+from apps.api.auth import issue_key
+from apps.api.main import app
+from apps.api.security import SECURITY_HEADERS
+from core.config import settings
 
 
 @pytest.fixture
-async def client():
-    db = MockPostgresStore()
+async def client(monkeypatch):
     vs = InMemoryVectorStore()
     await vs.initialize(384)
-    graph = MockGraphStore()
-    app.dependency_overrides[get_db_store] = lambda: db
-    app.dependency_overrides[get_vector_store] = lambda: vs
-    app.dependency_overrides[get_graph_store] = lambda: graph
+    db = InMemoryMemoryStore()
+    monkeypatch.setitem(app.dependency_overrides, deps.get_raw_db_store, lambda: db)
+    monkeypatch.setitem(app.dependency_overrides, deps.get_raw_vector_store, lambda: vs)
+    monkeypatch.setitem(app.dependency_overrides, deps.get_graph_store, MockGraphStore)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
-    app.dependency_overrides.clear()
 
 
-class TestSecurityHeaders:
-    async def test_headers_present(self, client):
-        resp = await client.get("/health")
-        assert resp.headers["X-Content-Type-Options"] == "nosniff"
-        assert resp.headers["X-Frame-Options"] == "DENY"
-        assert resp.headers["Referrer-Policy"] == "no-referrer"
-
-    async def test_api_routes_no_store(self, client):
-        resp = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        assert resp.headers.get("Cache-Control") == "no-store"
+async def test_security_headers_on_every_response(client):
+    r = await client.get("/health")
+    for header, value in SECURITY_HEADERS.items():
+        assert r.headers[header] == value
 
 
-class TestApiKeyAuth:
-    async def test_open_when_no_key_configured(self, client):
-        resp = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        assert resp.status_code == 200
-
-    async def test_rejects_missing_key(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "api_key", "s3cret")
-        resp = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        assert resp.status_code == 401
-        assert resp.json()["error"]["code"] == "unauthorized"
-
-    async def test_rejects_wrong_key(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "api_key", "s3cret")
-        resp = await client.get(
-            "/api/v1/stats", params={"user_id": "u1"}, headers={"X-API-Key": "nope"}
-        )
-        assert resp.status_code == 401
-
-    async def test_accepts_valid_key(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "api_key", "s3cret")
-        resp = await client.get(
-            "/api/v1/stats", params={"user_id": "u1"}, headers={"X-API-Key": "s3cret"}
-        )
-        assert resp.status_code == 200
-
-    async def test_health_stays_public(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "api_key", "s3cret")
-        resp = await client.get("/health")
-        assert resp.status_code == 200
+async def test_api_routes_are_not_cached(client):
+    r = await client.post("/api/v1/retrieve", json={"query": "x", "user_id": "u"})
+    assert r.headers["cache-control"] == "no-store"
+    assert "cache-control" not in (await client.get("/health")).headers
 
 
-class TestRateLimiting:
-    async def test_burst_then_429(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "rate_limit_enabled", True)
-        monkeypatch.setattr(security, "limiter", security.TokenBucketLimiter(60, burst=2))
-        ok1 = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        ok2 = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        blocked = await client.get("/api/v1/stats", params={"user_id": "u1"})
-        assert ok1.status_code == 200 and ok2.status_code == 200
-        assert blocked.status_code == 429
-        assert blocked.json()["error"]["code"] == "rate_limited"
-        assert "Retry-After" in blocked.headers
-
-    async def test_public_paths_not_limited(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "rate_limit_enabled", True)
-        monkeypatch.setattr(security, "limiter", security.TokenBucketLimiter(60, burst=1))
-        for _ in range(5):
-            resp = await client.get("/health")
-            assert resp.status_code == 200
+async def test_oversized_body_rejected_before_parsing(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_request_bytes", 100)
+    r = await client.post("/api/v1/ingest", json={"text": "x" * 500, "user_id": "u"})
+    assert r.status_code == 413 and r.json()["error"]["code"] == "payload_too_large"
 
 
-class TestBodySizeLimit:
-    async def test_oversized_body_rejected(self, client, monkeypatch):
-        monkeypatch.setattr(settings, "max_request_bytes", 100)
-        resp = await client.post(
-            "/api/v1/ingest",
-            json={"user_id": "u1", "text": "x" * 500},
-        )
-        assert resp.status_code == 413
-        assert resp.json()["error"]["code"] == "payload_too_large"
+async def test_stats_aggregates_one_users_memories(client):
+    for text, mtype in (("likes tea", "fact"), ("went hiking", "observation"), ("likes jazz", "fact")):
+        await client.post("/api/v1/ingest", json={"text": text, "user_id": "s1", "memory_type": mtype})
+    await client.post("/api/v1/ingest", json={"text": "other user", "user_id": "s2"})
+    body = (await client.get("/api/v1/stats", params={"user_id": "s1"})).json()
+    assert body["total_memories"] == 3 and body["by_type"] == {"fact": 2, "observation": 1}
+    assert body["by_status"] == {"active": 3} and body["last_memory_at"]
 
 
-class TestStats:
-    async def test_stats_aggregates(self, client):
-        for text, mtype in [
-            ("Alice prefers FAISS", "fact"),
-            ("Alice works at Acme", "observation"),
-            ("Alice asked about Qdrant", "observation"),
-        ]:
-            resp = await client.post(
-                "/api/v1/ingest",
-                json={"user_id": "stats_user", "text": text, "memory_type": mtype},
-            )
-            assert resp.status_code == 201
-
-        resp = await client.get("/api/v1/stats", params={"user_id": "stats_user"})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["total_memories"] == 3
-        assert body["by_type"].get("observation") == 2
-        assert body["by_type"].get("fact") == 1
-        assert 0.0 <= body["avg_importance"] <= 1.0
-        assert body["last_memory_at"]
+async def test_mutations_are_audited_durably_per_tenant(client, monkeypatch, _isolated_control_plane):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    store = _isolated_control_plane
+    _, admin = await issue_key(store, "acme", ["admin"], "ops-admin")
+    _, other = await issue_key(store, "globex", ["admin"], "globex-admin")
+    h = {"Authorization": f"Bearer {admin}"}
+    await client.post("/api/v1/ingest", json={"text": "audited write", "user_id": "u"}, headers=h)
+    await client.post("/api/v1/retrieve", json={"query": "audited", "user_id": "u"}, headers=h)
+    trail = (await client.get("/api/v1/admin/audit", headers=h)).json()
+    routes = [(e["method"], e["route"], e["status"], e["principal"]) for e in trail]
+    assert ("POST", "/api/v1/ingest", 201, "ops-admin") in routes
+    others = (await client.get("/api/v1/admin/audit", headers={"Authorization": f"Bearer {other}"})).json()
+    assert all(e["principal"] != "ops-admin" for e in others)  # tenant-scoped

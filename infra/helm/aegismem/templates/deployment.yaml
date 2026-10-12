@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aegismem.fullname" . }}
+  labels: {{- include "aegismem.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector:
+    matchLabels: {{- include "aegismem.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aegismem.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "aegismem.fullname" . }}
+      terminationGracePeriodSeconds: 30
+      # Kubernetes service-link env vars (e.g. POSTGRES_PORT=tcp://...) collide with app settings.
+      enableServiceLinks: false
+      securityContext: {{- include "aegismem.podSecurity" . | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "aegismem.selector" . | nindent 14 }}
+      containers:
+        - name: api
+          image: {{ include "aegismem.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: {{ include "aegismem.fullname" . }} }
+            - secretRef: { name: {{ .Values.existingSecret }} }
+          readinessProbe: { httpGet: { path: /ready, port: http }, periodSeconds: 5, failureThreshold: 3 }
+          livenessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 15, failureThreshold: 4 }
+          startupProbe: { httpGet: { path: /health, port: http }, periodSeconds: 2, failureThreshold: 30 }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- include "aegismem.containerSecurity" . | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]

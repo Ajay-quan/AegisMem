@@ -168,8 +168,10 @@ class ContradictionService:
             if report.contradiction_type == ContradictionType.TEMPORAL_UPDATE:
                 if memory_a.created_at <= memory_b.created_at:
                     memory_a.status = MemoryStatus.SUPERSEDED
+                    memory_a.metadata["superseded_by"] = memory_b.memory_id
                 else:
                     memory_b.status = MemoryStatus.SUPERSEDED
+                    memory_b.metadata["superseded_by"] = memory_a.memory_id
         else:
             memory_a.contradiction_status = ContradictionStatus.SUSPECTED
             memory_b.contradiction_status = ContradictionStatus.SUSPECTED

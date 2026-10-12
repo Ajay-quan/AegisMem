@@ -1,0 +1,21 @@
+# Non-secret settings. Secrets come from the `aegismem-secrets` Secret (see secret.example.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegismem-config
+data:
+  APP_ENV: production
+  AUTH_ENABLED: "true"
+  REQUIRE_RLS: "true"
+  MEMORY_BACKEND: postgres
+  VECTOR_BACKEND: pgvector
+  GRAPH_BACKEND: none
+  EMBEDDING_BACKEND: openai
+  EMBEDDING_API_BASE: https://api.openai.com/v1
+  EMBEDDING_MODEL: text-embedding-3-small
+  EMBEDDING_DIMENSION: "1536"
+  RATE_LIMIT_BACKEND: redis
+  METRICS_ENABLED: "true"
+  OTEL_ENABLED: "false"
+  OUTBOX_WORKER_ENABLED: "true"
+  LOG_LEVEL: INFO

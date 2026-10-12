@@ -1,4 +1,4 @@
-"""Shared test fixtures for stateful.ai tests."""
+"""Shared test fixtures for AegisMem tests."""
 from __future__ import annotations
 
 import pytest
@@ -11,72 +11,8 @@ from adapters.graph_store.neo4j_store import MockGraphStore
 from core.schemas.memory import MemoryItem, MemoryType, SourceType, Observation
 
 
-class MockPostgresStore:
-    """In-memory mock for PostgresStore."""
-
-    def __init__(self):
-        self._memories: dict[str, MemoryItem] = {}
-        self._facts = []
-        self._contradictions = []
-        self._logs = []
-        self._evals = []
-
-    async def initialize(self):
-        pass
-
-    async def save_memory(self, memory: MemoryItem) -> MemoryItem:
-        self._memories[memory.memory_id] = memory
-        return memory
-
-    async def get_memory(self, memory_id: str) -> MemoryItem:
-        from core.exceptions import MemoryNotFoundError
-        if memory_id not in self._memories:
-            raise MemoryNotFoundError(memory_id)
-        return self._memories[memory_id]
-
-    async def update_memory(self, memory: MemoryItem) -> MemoryItem:
-        self._memories[memory.memory_id] = memory
-        return memory
-
-    async def delete_memory(self, memory_id: str, user_id: str) -> None:
-        if memory_id in self._memories:
-            self._memories[memory_id].status = "deleted"
-
-    async def list_memories(self, user_id: str, namespace: str = "", memory_type: str = "",
-                             status: str = "active", limit: int = 50, offset: int = 0) -> list:
-        results = [
-            m for m in self._memories.values()
-            if m.user_id == user_id
-            and (not status or (m.status if isinstance(m.status, str) else m.status.value) == status)
-            and (not namespace or m.namespace == namespace)
-            and (not memory_type or (m.memory_type if isinstance(m.memory_type, str) else m.memory_type.value) == memory_type)
-        ]
-        return results[offset:offset + limit]
-
-    async def count_memories(self, user_id: str, namespace: str = "") -> int:
-        return len([m for m in self._memories.values() if m.user_id == user_id])
-
-    async def save_fact(self, fact):
-        self._facts.append(fact)
-        return fact
-
-    async def get_facts_for_user(self, user_id: str, subject: str = ""):
-        return []
-
-    async def save_contradiction(self, report_id, a_id, b_id, description, confidence):
-        self._contradictions.append({"report_id": report_id, "a_id": a_id, "b_id": b_id})
-
-    async def list_contradictions(self, resolved: bool = False):
-        return []
-
-    async def save_eval_result(self, eval_name, run_id, metrics, config):
-        self._evals.append({"eval_name": eval_name, "run_id": run_id})
-
-    async def get_operation_logs(self, memory_id: str):
-        return []
-
-    async def close(self):
-        pass
+# Tests historically call this MockPostgresStore; it is the real in-memory adapter.
+from adapters.relational_store.memory_store import InMemoryMemoryStore as MockPostgresStore  # noqa: E402,F401
 
 
 @pytest.fixture

@@ -10,18 +10,17 @@ from .base import VectorStore, VectorSearchResult
 
 logger = logging.getLogger(__name__)
 
-# Stable namespace for deriving Qdrant point IDs from stateful.ai string ids.
-# Qdrant accepts integer or UUID point ids; Python's built-in ``hash()`` is
-# salted per-process (PYTHONHASHSEED), so the previous ``abs(hash(id))`` scheme
-# produced DIFFERENT point ids after every restart — silently orphaning vectors
-# and breaking delete/get. A UUIDv5 over the original id is deterministic across
-# processes and machines, so upsert/delete/get stay consistent forever.
-_POINT_ID_NAMESPACE = uuid.UUID("a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
+
+_POINT_NS = uuid.UUID("6f1c2b1e-6a8e-4d55-9a8e-2f0b6b8f3c11")
 
 
-def point_id_for(memory_id: str) -> str:
-    """Deterministically map an stateful.ai string id to a stable Qdrant UUID id."""
-    return str(uuid.uuid5(_POINT_ID_NAMESPACE, memory_id))
+def _point_id(memory_id: str) -> str:
+    """Stable Qdrant point id. Must not use hash(): it is salted per process,
+    so ids would change on restart and deletes would silently miss."""
+    return str(uuid.uuid5(_POINT_NS, memory_id))
+
+
+point_id_for = _point_id  # public alias (used by migrations/tools)
 
 
 class QdrantStore(VectorStore):
@@ -31,7 +30,7 @@ class QdrantStore(VectorStore):
         self,
         host: str = "localhost",
         port: int = 6333,
-        collection_name: str = "stateful_ai_memories",
+        collection_name: str = "aegismem_memories",
     ) -> None:
         self.host = host
         self.port = port
@@ -66,9 +65,7 @@ class QdrantStore(VectorStore):
     ) -> None:
         from qdrant_client.models import PointStruct
         client = await self._get_client()
-        # Qdrant needs integer or UUID ids; derive a deterministic UUID so the
-        # mapping is stable across process restarts (see point_id_for).
-        point_id = point_id_for(id)
+        point_id = _point_id(id)
         payload["_aegis_id"] = id  # store original string id
         await client.upsert(
             collection_name=self.collection_name,
@@ -94,13 +91,15 @@ class QdrantStore(VectorStore):
                 from qdrant_client.models import Filter as QFilter
                 qdrant_filter = QFilter(must=conditions)
 
-        results = await client.search(
+        # query_points replaces the removed `search` API (qdrant-client >= 1.12).
+        response = await client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             query_filter=qdrant_filter,
             with_payload=True,
         )
+        results = response.points
 
         return [
             VectorSearchResult(
@@ -114,15 +113,40 @@ class QdrantStore(VectorStore):
     async def delete(self, id: str) -> None:
         from qdrant_client.models import PointIdsList
         client = await self._get_client()
-        point_id = point_id_for(id)
+        point_id = _point_id(id)
         await client.delete(
             collection_name=self.collection_name,
             points_selector=PointIdsList(points=[point_id]),
         )
 
+    async def backfill_tenant(self, tenant_id: str, batch: int = 256) -> int:
+        """Stamp tenant_id on points written before tenancy (they are invisible under tenant filters)."""
+        from qdrant_client.models import Filter, IsEmptyCondition, PayloadField
+        client = await self._get_client()
+        missing = Filter(must=[IsEmptyCondition(is_empty=PayloadField(key="tenant_id"))])
+        updated, offset = 0, None
+        while True:
+            points, offset = await client.scroll(self.collection_name, scroll_filter=missing,
+                                                 limit=batch, offset=offset, with_payload=False)
+            if not points:
+                return updated
+            await client.set_payload(self.collection_name, payload={"tenant_id": tenant_id},
+                                     points=[p.id for p in points])
+            updated += len(points)
+            if offset is None:
+                return updated
+
+    async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
+        client = await self._get_client()
+        await client.set_payload(
+            collection_name=self.collection_name,
+            payload=fields,
+            points=[_point_id(id)],
+        )
+
     async def get(self, id: str) -> VectorSearchResult | None:
         client = await self._get_client()
-        point_id = point_id_for(id)
+        point_id = _point_id(id)
         try:
             results = await client.retrieve(
                 collection_name=self.collection_name,
@@ -177,6 +201,10 @@ class InMemoryVectorStore(VectorStore):
 
     async def delete(self, id: str) -> None:
         self._store.pop(id, None)
+
+    async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
+        if id in self._store:
+            self._store[id][1].update(fields)
 
     async def get(self, id: str) -> VectorSearchResult | None:
         if id in self._store:

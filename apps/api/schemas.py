@@ -1,4 +1,4 @@
-"""FastAPI API schemas for stateful.ai endpoints."""
+"""FastAPI API schemas for AegisMem endpoints."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,6 +29,9 @@ class IngestResponse(BaseModel):
     importance_score: float
     content_preview: str
     created_at: datetime
+    status: str = Field(default="active", description="'active', or 'pending' if quarantined for review")
+    quarantine_reason: str | None = None
+    trust: float | None = None
 
 
 class BatchIngestRequest(BaseModel):
@@ -71,44 +74,13 @@ class MemorySnippet(BaseModel):
 
 
 class RetrieveResponse(BaseModel):
+    retrieval_id: str = ""
     query: str
     results: list[MemorySnippet]
     total_found: int
     latency_ms: float
     context_window: str = ""
-    # Echo back to POST /feedback to close the continual-learning loop. Empty
-    # string when continual learning is disabled.
-    query_id: str = ""
-
-
-# ---------------------------------------------------------------------------
-# Feedback / continual learning
-# ---------------------------------------------------------------------------
-
-
-class FeedbackRequest(BaseModel):
-    query_id: str = Field(..., description="query_id returned by /retrieve")
-    memory_id: str = Field(..., description="which served memory the feedback is about")
-    useful: bool | None = Field(default=None, description="coarse explicit signal")
-    score: float | None = Field(
-        default=None, ge=0.0, le=1.0, description="fine grade in [0,1] (overrides 'useful')",
-    )
-    outcome: str = Field(default="", description="'success' | 'failure' | ''")
-
-
-class FeedbackResponse(BaseModel):
-    recorded: bool
-    reward: float
-    namespace: str
-    policy_updates: int
-    weights: dict[str, float] = Field(default_factory=dict)
-    message: str = ""
-
-
-class LearningStatsResponse(BaseModel):
-    enabled: bool
-    replay: dict[str, Any] = Field(default_factory=dict)
-    policy: dict[str, Any] = Field(default_factory=dict)
+    guard_report: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +180,132 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     components: dict[str, str]
+
+
+class StatsResponse(BaseModel):
+    user_id: str
+    total_memories: int
+    namespaces: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Handoff
+# ---------------------------------------------------------------------------
+
+
+class HandoffRequest(BaseModel):
+    user_id: str
+    namespace: str = ""
+    task: str = Field(default="", description="What the receiving agent is about to do")
+    since: datetime | None = Field(default=None, description="Only show changes/activity after this time")
+    token_budget: int = Field(default=1500, ge=100, le=32000)
+    max_per_section: int = Field(default=10, ge=1, le=50)
+
+
+# ---------------------------------------------------------------------------
+# Feedback / continual learning
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    retrieval_id: str
+    user_id: str
+    used_memory_ids: list[str] = Field(
+        default_factory=list,
+        description="Memories from this retrieval the agent actually used; the rest count as unused",
+    )
+
+
+class FeedbackResponse(BaseModel):
+    accepted: int
+    used: int
+    learning_active: bool
+    weights: dict[str, float]
+
+
+class LearningStateResponse(BaseModel):
+    user_id: str
+    learning_active: bool
+    events: int
+    positives: int
+    weights: dict[str, float]
+    default_weights: dict[str, float]
+
+
+# ---------------------------------------------------------------------------
+# Integrity: erasure, receipts, quarantine
+# ---------------------------------------------------------------------------
+
+
+class ForgetRequest(BaseModel):
+    user_id: str
+    memory_ids: list[str] = Field(default_factory=list)
+    all_for_user: bool = False
+    include_duplicates: bool = True
+    reason: str = Field(default="", description="e.g. 'GDPR Art.17 request #123'")
+
+
+class ErasureReceipt(BaseModel):
+    body: dict[str, Any]
+    signature: str
+    alg: str
+
+
+class ReceiptVerifyResponse(BaseModel):
+    valid: bool
+
+
+class QuarantineItem(BaseModel):
+    memory_id: str
+    content: str
+    reason: str
+    trust: float
+    source: str
+    created_at: datetime
+
+
+class QuarantineListResponse(BaseModel):
+    items: list[QuarantineItem]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Continual learning from outcomes
+# ---------------------------------------------------------------------------
+
+
+class CorrectionRequest(BaseModel):
+    user_id: str
+    memory_id: str
+    kind: str = Field(..., description=(
+        "'wrong' (never true; penalises its origin), 'outdated' (changed; no penalty), "
+        "'malicious' (attack that slipped through; trains the risk model and erases it with derivatives)"
+    ))
+    corrected_text: str = Field(default="", description="The right information, stored as the replacement")
+    note: str = ""
+
+
+class CorrectionResponse(BaseModel):
+    corrected_memory_id: str
+    replacement_memory_id: str | None
+    kind: str
+    source_trust_after: float | None
+    flagged_derived: list[str]
+    receipt_id: str | None = None
+
+
+class TrustSource(BaseModel):
+    source: str
+    origin: str
+    trust: float
+    default_trust: float
+    events: int
+    updated_at: str | None
+
+
+class TrustSourcesResponse(BaseModel):
+    sources: list[TrustSource]
+    guard_min_trust: float
 
 
 class StatsResponse(BaseModel):

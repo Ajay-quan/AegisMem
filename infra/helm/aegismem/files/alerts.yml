@@ -1,0 +1,57 @@
+# Prometheus alerting rules for AegisMem. Validate: promtool check rules infra/observability/alerts.yml
+groups:
+  - name: aegismem.integrity
+    rules:
+      - alert: AegisErasureNotVerified
+        expr: increase(aegis_erasures_total{verified="false"}[15m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Erasure could not be verified in every store (tenant {{ $labels.tenant }})"
+          runbook: "Check vector/graph store health; re-run /forget; inspect the receipt's verification section."
+      - alert: AegisOutboxDeadLetters
+        expr: increase(aegis_outbox_ops_total{result="dead"}[30m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Vector index repairs are failing permanently ({{ $labels.op }})"
+          runbook: "aegisctl outbox-status; fix the index backend; dead rows need manual replay."
+      - alert: AegisQuarantineSpike
+        expr: >
+          sum by (tenant) (rate(aegis_memory_writes_total{outcome=~"quarantined_.*"}[15m]))
+          > 5 * sum by (tenant) (rate(aegis_memory_writes_total{outcome=~"quarantined_.*"}[24h] offset 1h)) + 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Quarantine rate for tenant {{ $labels.tenant }} is 5x its baseline (possible poisoning campaign)"
+      - alert: AegisGuardWithholdSpike
+        expr: sum by (tenant, reason) (rate(aegis_guard_decisions_total{action="withhold"}[15m])) > 1
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Guard is withholding many memories ({{ $labels.reason }}) for tenant {{ $labels.tenant }}"
+  - name: aegismem.availability
+    rules:
+      - alert: AegisHighErrorRate
+        expr: >
+          sum(rate(aegis_http_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(aegis_http_requests_total[5m])), 1e-9) > 0.02
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "More than 2% of API requests are failing" }
+      - alert: AegisLatencyHigh
+        expr: >
+          histogram_quantile(0.95, sum by (le, route) (rate(aegis_http_request_seconds_bucket{route=~"/api/v1/(retrieve|ingest)"}[5m]))) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "p95 latency for {{ $labels.route }} above 500ms" }
+  - name: aegismem.security
+    rules:
+      - alert: AegisAuthFailureSpike
+        expr: sum(rate(aegis_auth_failures_total{reason="invalid_or_revoked"}[5m])) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Sustained invalid/revoked API key attempts (leaked key or brute force)" }
+      - alert: AegisRateLimitedSustained
+        expr: sum by (class) (rate(aegis_rate_limited_total[10m])) > 0.5
+        for: 15m
+        labels: { severity: info }
+        annotations: { summary: "Tenants are being rate limited ({{ $labels.class }}); review quotas" }

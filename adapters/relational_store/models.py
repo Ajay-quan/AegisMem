@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for stateful.ai relational store."""
+"""SQLAlchemy ORM models for AegisMem relational store."""
 from __future__ import annotations
 
 import uuid
@@ -26,6 +26,7 @@ class Base(DeclarativeBase):
 class MemoryRecord(Base):
     __tablename__ = "memories"
     __table_args__ = (
+        Index("ix_memories_tenant_user", "tenant_id", "user_id", "status"),
         Index("ix_memories_user_namespace", "user_id", "namespace"),
         Index("ix_memories_status", "status"),
         Index("ix_memories_type", "memory_type"),
@@ -33,10 +34,14 @@ class MemoryRecord(Base):
     )
 
     memory_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default",
+                                           server_default="default")
     namespace: Mapped[str] = mapped_column(String(255), nullable=False)
     user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_id: Mapped[str] = mapped_column(String(255), default="")
     memory_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    memory_layer: Mapped[str] = mapped_column(String(20), nullable=False, default="episodic",
+                                              server_default="episodic")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), default="user_message")
     source_ref: Mapped[str] = mapped_column(String(255), default="")
@@ -51,12 +56,16 @@ class MemoryRecord(Base):
     recency_score: Mapped[float] = mapped_column(Float, default=1.0)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.8)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
+    retrieval_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    successful_retrieval_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
+                                                            server_default="0")
 
     version: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(50), default="active")
     contradiction_status: Mapped[str] = mapped_column(String(50), default="none")
 
     parent_memory_ids: Mapped[list] = mapped_column(JSON, default=list)
+    contradicted_by: Mapped[list] = mapped_column(JSON, nullable=True, default=list)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 

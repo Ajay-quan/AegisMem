@@ -1,0 +1,33 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aegismem.fullname" . }}-migrate
+  labels: {{- include "aegismem.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      # Hooks run before regular chart resources exist, so this pod must not reference the
+      # chart's ServiceAccount (pod creation would be rejected and the install would hang).
+      automountServiceAccountToken: false
+      # Kubernetes service-link env vars (e.g. POSTGRES_PORT=tcp://...) collide with app settings.
+      enableServiceLinks: false
+      restartPolicy: Never
+      securityContext: {{- include "aegismem.podSecurity" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "aegismem.image" . }}
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: AEGIS_MIGRATION_URL
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: AEGIS_MIGRATION_URL } }
+            - name: AEGIS_VECTOR_DIM
+              value: {{ .Values.config.EMBEDDING_DIMENSION | quote }}
+          securityContext: {{- include "aegismem.containerSecurity" . | nindent 12 }}
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+{{- end }}

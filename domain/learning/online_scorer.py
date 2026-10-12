@@ -1,4 +1,4 @@
-"""Online, per-namespace learned ranking policy (Stateful-CL loop L1).
+"""Online, per-namespace learned ranking policy (AegisMem-CL loop L1).
 
 The static scorer in ``domain.memory.scoring`` combines signals with *fixed*
 weights from settings. This policy makes those weights *learned* and *adapted

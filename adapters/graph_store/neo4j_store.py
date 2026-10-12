@@ -124,6 +124,26 @@ class GraphStore:
             records = await result.data()
             return records
 
+    async def delete_memory_node(self, memory_id: str) -> None:
+        if not self._driver:
+            return
+        async with self._driver.session() as session:
+            await session.run(
+                "MATCH (m:Memory {memory_id: $memory_id}) DETACH DELETE m",
+                memory_id=memory_id,
+            )
+
+    async def has_memory_node(self, memory_id: str) -> bool:
+        if not self._driver:
+            return False
+        async with self._driver.session() as session:
+            result = await session.run(
+                "MATCH (m:Memory {memory_id: $memory_id}) RETURN count(m) AS n",
+                memory_id=memory_id,
+            )
+            record = await result.single()
+            return bool(record and record["n"])
+
     async def mark_contradiction(self, memory_a_id: str, memory_b_id: str) -> None:
         if not self._driver:
             return
@@ -196,6 +216,13 @@ class MockGraphStore(GraphStore):
                 if relationship is None or rel == relationship:
                     related.append({"entity_id": other, "rel_type": rel})
         return related
+
+    async def delete_memory_node(self, memory_id: str) -> None:
+        self._nodes.pop(memory_id, None)
+        self._edges = [e for e in self._edges if memory_id not in (e[0], e[1])]
+
+    async def has_memory_node(self, memory_id: str) -> bool:
+        return memory_id in self._nodes
 
     async def mark_contradiction(self, memory_a_id: str, memory_b_id: str) -> None:
         self._edges.append((memory_a_id, memory_b_id, "CONTRADICTS"))

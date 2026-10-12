@@ -1,8 +1,8 @@
-"""stateful.ai custom exceptions."""
+"""AegisMem custom exceptions."""
 
 
 class StatefulError(Exception):
-    """Base exception for stateful.ai."""
+    """Base exception for AegisMem."""
 
 
 class MemoryNotFoundError(StatefulError):

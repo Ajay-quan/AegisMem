@@ -1,5 +1,6 @@
-"""stateful.ai core configuration using pydantic-settings."""
+"""AegisMem core configuration using pydantic-settings."""
 from functools import lru_cache
+import os
 from typing import Literal
 
 from pydantic import Field
@@ -8,7 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # AEGIS_ENV_FILE selects the dotenv file; empty disables it (the test suite does this so
+        # a developer's personal .env can never change test behaviour).
+        env_file=os.environ.get("AEGIS_ENV_FILE", ".env") or None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -20,50 +23,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
 
-    # --- API security -------------------------------------------------
-    # When ``api_key`` is empty, authentication is disabled (zero-config dev).
-    # Set STATEFUL_AI_API_KEY in production to require the ``X-API-Key`` header
-    # on all /api/* routes.
-    api_key: str = Field(default="", validation_alias="STATEFUL_AI_API_KEY")
-
-    # Scoped multi-tenant keys (revocable, named, optional per-tenant). Format:
-    # comma- or newline-separated "name:secret" or "name:secret:tenant". Works
-    # alongside the single STATEFUL_AI_API_KEY above (which maps to name "default").
-    api_keys: str = Field(default="", validation_alias="STATEFUL_AI_API_KEYS")
-
-    # Comma-separated list of allowed CORS origins ("*" for any).
-    cors_allow_origins: str = "*"
-
-    # Token-bucket rate limiting per client (API key if present, else IP).
-    rate_limit_enabled: bool = False
-    rate_limit_per_minute: int = 120
-    rate_limit_burst: int = 30
-
-    # Reject request bodies larger than this many bytes (default 1 MiB).
-    max_request_bytes: int = 1_048_576
-
-    # Storage backend selection. "memory" is the zero-infra default so the
-    # full FastAPI service boots with no external database; the production
-    # values opt into external services. When a non-memory backend is selected
-    # but unreachable, behavior depends on app_env: development/staging fall
-    # back to in-memory (with a warning); production raises so a misconfigured
-    # deployment fails loudly instead of silently losing durability.
-    relational_store: Literal["memory", "postgres"] = "memory"
-    vector_store: Literal["memory", "qdrant"] = "memory"
-    graph_store: Literal["memory", "neo4j"] = "memory"
-    data_dir: str = "./data/stateful_ai"
-
-    @property
-    def strict_stores(self) -> bool:
-        """In production, configured external stores must be reachable."""
-        return self.app_env == "production"
-
     # PostgreSQL
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str = "stateful_ai"
-    postgres_user: str = "stateful_ai"
-    postgres_password: str = "stateful_ai_password"
+    postgres_db: str = "aegismem"
+    postgres_user: str = "aegismem"
+    postgres_password: str = "aegismem_password"
 
     @property
     def postgres_url(self) -> str:
@@ -79,33 +44,131 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    # Control plane (learning event log, receipts, ledger, API keys).
+    # Empty -> Postgres in staging/production, a local SQLite file in development.
+    control_database_url: str = ""
+    dev_control_db_path: str = ".aegis/control.db"
+    default_tenant: str = "default"
+    # Refuse to boot in staging/production if Postgres RLS cannot be enforced for the app role.
+    require_rls: bool = True
+
+    # HTTP hardening
+    max_request_bytes: int = 1_048_576
+
+    # Hybrid retrieval (dense + BM25 fused with Reciprocal Rank Fusion)
+    hybrid_retrieval_enabled: bool = True
+    # BM25 corpus size per user. LoCoMo: a 200 cap lost 10 pts recall@5 on long histories.
+    # Built per query (O(n)); a database full-text index replaces this for very large users (Q2).
+    lexical_candidate_pool: int = 2000
+    rrf_k: int = 60
+    bm25_k1: float = 1.5
+    bm25_b: float = 0.75
+    # Relevance fed to ranking = (1 - w) * dense cosine + w * normalized BM25. Tuned on LoCoMo
+    # (bench/RESULTS.md): 0.15 -> recall@5 0.565 vs 0.514 raw dense; 0.3 -> 0.549; 0.5 -> 0.531.
+    hybrid_lexical_weight: float = 0.15
+
+    # Reranking
+    reranker_type: Literal["heuristic", "cross_encoder"] = "heuristic"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # PII redaction at ingest (emails, phones, cards with Luhn, SSNs, IPs, provider secrets)
+    pii_redaction_enabled: bool = False
+
+    # Experimental EWC ranking policy (domain/learning/online_scorer.py), evaluation only.
+    continual_learning_enabled: bool = False
+
+    # Observability
+    metrics_enabled: bool = True
+    otel_enabled: bool = False
+    otel_exporter: Literal["otlp", "console"] = "otlp"
+    otel_service_name: str = "aegismem-api"
+
+    # Per-tenant rate limits (token bucket). "redis" is required for multi-replica correctness.
+    rate_limit_backend: Literal["off", "memory", "redis"] = "memory"
+    rate_limit_read_per_minute: int = 1200
+    rate_limit_read_burst: int = 200
+    rate_limit_write_per_minute: int = 600
+    rate_limit_write_burst: int = 100
+
+    # Vector-sync outbox worker (repairs index writes that failed inline)
+    outbox_worker_enabled: bool = True
+    outbox_interval_seconds: float = 5.0
+    outbox_max_attempts: int = 8
+    # Retention for operational records (pruned by the background maintenance loop).
+    ledger_retention_hours: int = 168
+    idempotency_retention_hours: int = 24
+
+    # Auth. Disabled only in development; staging/production refuse to boot without it.
+    auth_enabled: bool = False
+    api_key_pepper: str = ""
+
+    @property
+    def resolved_control_database_url(self) -> str:
+        if self.control_database_url:
+            return self.control_database_url
+        if self.app_env == "development":
+            return f"sqlite+aiosqlite:///{self.dev_control_db_path}"
+        return self.postgres_url
+
+    @property
+    def is_production_like(self) -> bool:
+        return self.app_env in ("staging", "production")
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
     # Qdrant
+    # Storage topology. "pgvector" + graph "none" = single-store mode (one Postgres).
+    # Zero-infra defaults for development; staging/production must configure real stores
+    # (validate_runtime_config refuses in-memory backends there).
+    vector_backend: Literal["qdrant", "pgvector", "memory"] = "memory"
+    # "memory" = Docker-free local development (nothing persists). Rejected outside development.
+    memory_backend: Literal["postgres", "memory"] = "memory"
+    graph_backend: Literal["neo4j", "memory", "none"] = "memory"
+
+    # Names used on the pre-merge main branch.
+    @property
+    def relational_store(self) -> str:
+        return self.memory_backend
+
+    @property
+    def vector_store(self) -> str:
+        return self.vector_backend
+
+    @property
+    def graph_store(self) -> str:
+        return self.graph_backend
+
+    @property
+    def strict_stores(self) -> bool:
+        return self.is_production_like
+
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
-    qdrant_collection: str = "stateful_ai_memories"
+    qdrant_collection: str = "aegismem_memories"
 
     # Neo4j
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "stateful_ai_password"
+    neo4j_password: str = "aegismem_password"
 
     # LLM Providers
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
     # Embedding
-    embedding_model: str = "BAAI/bge-large-en-v1.5"
-    # "mock" is a deterministic, dependency-free backend used by the zero-infra
-    # default and the test suite.
-    embedding_backend: Literal["mock", "sentence_transformers", "openai"] = (
-        "mock"
-    )
-    embedding_dimension: int = 1024
-    # OpenAI embedding model used when embedding_backend="openai".
-    openai_embedding_model: str = "text-embedding-3-small"
+    # "openai" = any OpenAI-compatible /embeddings API: OpenAI, Azure gateways, Voyage, vLLM,
+    # LM Studio, Ollama (http://host:11434/v1). "mock" is development-only (meaningless vectors).
+    embedding_backend: Literal["openai", "sentence_transformers", "mock"] = "mock"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_api_base: str = "https://api.openai.com/v1"
+    embedding_api_key: str = ""  # falls back to OPENAI_API_KEY
+    # Single source of truth for vector size (index, migrations, embedding probe).
+    embedding_dimension: int = 384
+
+    @property
+    def vector_dimension(self) -> int:
+        return self.embedding_dimension
 
     # Default LLM
     default_llm_provider: Literal["openai", "anthropic", "local", "mock"] = "local"
@@ -121,26 +184,18 @@ class Settings(BaseSettings):
     retrieval_top_n_candidates: int = 30
     retrieval_top_k: int = 5
 
-    # Hybrid retrieval (dense semantic + sparse lexical fused with RRF)
-    hybrid_retrieval_enabled: bool = True
-    lexical_candidate_pool: int = 200   # max memories pulled into the BM25 corpus
-    rrf_k: int = 60                     # Reciprocal Rank Fusion constant
-    bm25_k1: float = 1.5                # BM25 term-frequency saturation
-    bm25_b: float = 0.75                # BM25 length normalization
-
-    # Reranking
-    reranker_type: Literal["heuristic", "cross_encoder"] = "heuristic"
-    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-    # Ranking weights (kept ~1.0 in aggregate for interpretability)
-    weight_semantic: float = 0.35
-    weight_lexical: float = 0.15
-    weight_recency: float = 0.20
-    weight_importance: float = 0.20
-    weight_access: float = 0.10
+    # Ranking weights (must sum to ~1.0 for interpretability)
+    # Relevance dominates; the rest are tie-breakers (tuned on LoCoMo, see bench/locomo.py).
+    weight_semantic: float = 0.85
+    weight_recency: float = 0.05
+    weight_importance: float = 0.05
+    weight_utility: float = 0.05
 
     # Penalties
     contradiction_penalty_weight: float = 0.40
+
+    # Integrity guard: memories whose (learned) trust falls below this are not served.
+    guard_min_trust: float = 0.2
     contradiction_confidence_threshold: float = 0.7
 
     # Recency decay
@@ -157,26 +212,6 @@ class Settings(BaseSettings):
     # Memory-type scoring boosts (applied to composite score)
     type_boost_semantic: float = 0.05   # semantic memories get a small boost
     type_boost_preference: float = 0.03 # preference-type queries boost preference memories
-
-    # --- Continual learning (Stateful-CL) --------------------------------
-    # Master switch. When False (default) retrieval uses the static
-    # ``weight_*`` values above and nothing is logged/learned, so the
-    # zero-infra behavior and existing tests are unchanged. When True, the
-    # per-namespace online ranking policy supplies learned weights, retrievals
-    # are logged to the replay buffer, and /feedback drives online updates.
-    continual_learning_enabled: bool = False
-    cl_learning_rate: float = 0.05       # online SGD step size for the policy
-    cl_ewc_lambda: float = 0.1           # EWC anchor strength (anti-forgetting)
-    cl_replay_capacity: int = 5000       # max logged interactions / labeled examples
-    cl_replay_persist: bool = False      # persist replay buffer to data_dir as JSON
-    cl_reward_success_bonus: float = 0.2 # outcome=success/failure nudge on reward
-    cl_reward_contradiction_penalty: float = 0.3  # penalty for stale/contradicted hits
-
-    # --- Privacy --------------------------------------------------------
-    # Redact PII (emails, phones, cards, SSNs, IPs, provider secrets) at the
-    # ingest boundary so sensitive tokens are never embedded, stored, or
-    # retrieved. Off by default; enable for deployments handling real user data.
-    pii_redaction_enabled: bool = False
 
 
 @lru_cache()

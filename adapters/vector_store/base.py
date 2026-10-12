@@ -39,4 +39,8 @@ class VectorStore(ABC):
     async def get(self, id: str) -> VectorSearchResult | None: ...
 
     @abstractmethod
+    async def update_payload(self, id: str, fields: dict[str, Any]) -> None:
+        """Merge ``fields`` into a point's payload (e.g. keep ``status`` in sync)."""
+
+    @abstractmethod
     async def initialize(self, dimension: int) -> None: ...

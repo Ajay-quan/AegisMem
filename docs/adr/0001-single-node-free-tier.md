@@ -1,12 +1,14 @@
 # ADR 0001: Single-Node AWS Free Tier Demonstration
 
+> **Status: Superseded** by [ADR 0005](0005-merge-integrity-architecture.md) (2026-10-11). Kept for history.
+
 ## Status
 
 Accepted
 
 ## Context
 
-stateful.ai needs to prove cloud deployability without creating cost. Managed services such as RDS, OpenSearch, EFS, NAT Gateway, load balancers, Route 53 hosted zones, and API Gateway can improve production architecture but violate the zero-cost constraint.
+AegisMem needs to prove cloud deployability without creating cost. Managed services such as RDS, OpenSearch, EFS, NAT Gateway, load balancers, Route 53 hosted zones, and API Gateway can improve production architecture but violate the zero-cost constraint.
 
 ## Decision
 

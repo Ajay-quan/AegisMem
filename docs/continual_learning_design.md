@@ -1,6 +1,6 @@
-# stateful.ai Continual Learning Architecture — "Stateful-CL"
+# AegisMem Continual Learning Architecture — "AegisMem-CL"
 
-> A design brief for turning stateful.ai from a *static memory store* into a *self-improving
+> A design brief for turning AegisMem from a *static memory store* into a *self-improving
 > memory system* that learns continually from use — without catastrophic forgetting, without
 > retraining a foundation model, and without breaking the zero-infra, adapter-per-backend
 > contract the project is built on.
@@ -20,9 +20,9 @@ L2–L5 remain on the roadmap below. Author target: world-class agent-memory sys
 ## 0. Thesis: memory *is* the continual-learning substrate
 
 Most "AI memory" products treat memory as passive storage and continual learning as a separate,
-scary GPU problem. The central bet of Stateful-CL is the opposite:
+scary GPU problem. The central bet of AegisMem-CL is the opposite:
 
-**stateful.ai's memory corpus is already a structured, deduplicated, importance-scored, versioned
+**AegisMem's memory corpus is already a structured, deduplicated, importance-scored, versioned
 replay buffer.** That is exactly the object every serious continual-learning method needs.
 So instead of bolting CL on, we close five nested learning loops *around the data the system
 already produces*, from millisecond ranking tweaks to slow parametric adaptation — each loop
@@ -33,7 +33,7 @@ catastrophic-forgetting mitigation from an add-on into a structural property.
 The reframing also gives us a clean way to be **better than the current OSS field**, not just
 equal to it:
 
-| System | What it learns | What it *doesn't* | Stateful-CL's move |
+| System | What it learns | What it *doesn't* | AegisMem-CL's move |
 |---|---|---|---|
 | **Mem0** | what to extract/store (LLM-driven) | ranking weights, reranker, embeddings are fixed | learn the ranking + reranker + embedder online |
 | **Zep / Graphiti** | temporal facts (bi-temporal KG) | retrieval policy is heuristic; no parametric self-improvement | add learned ranking + per-tenant adapters on top of a temporal layer |
@@ -47,7 +47,7 @@ continual-eval harness** — something none of the four ship today.
 
 ## 1. The five learning loops (fast → slow)
 
-Think of Stateful-CL as a control system with five loops operating at different timescales. Each is
+Think of AegisMem-CL as a control system with five loops operating at different timescales. Each is
 independently shippable and independently valuable; together they compound.
 
 ### L1 — Online retrieval-ranking adaptation (timescale: per query, ms)
@@ -112,7 +112,7 @@ a conflict, perform **governed belief revision**: supersede with versioning (alr
 `MemoryStatus.SUPERSEDED` + `parent_memory_ids`), bump confidence on the survivor, and record a
 `MemoryUpdateDecision`. Add **bi-temporal validity** (`valid_from` / `valid_to` already exist on
 `MemoryItem` and `FactRecord`) so the system models *state changes over time* — matching Zep's
-best-in-class temporal correctness, but inside stateful.ai's lifecycle.
+best-in-class temporal correctness, but inside AegisMem's lifecycle.
 
 ---
 
@@ -277,8 +277,8 @@ Each phase is independently shippable and reversible.
 
 ## 9. One-paragraph pitch
 
-> stateful.ai already stores memory as a versioned, scored, deduplicated corpus — which is precisely
-> the replay buffer continual learning needs. Stateful-CL closes five nested loops around it: an
+> AegisMem already stores memory as a versioned, scored, deduplicated corpus — which is precisely
+> the replay buffer continual learning needs. AegisMem-CL closes five nested loops around it: an
 > online learned ranker, a replay-and-EWC-guarded LoRA reranker, per-tenant embedding adapters,
 > sleep-time consolidation/reflection with adaptive forgetting, and temporal belief revision —
 > all gated by a continual-eval harness that measures backward/forward transfer before anything

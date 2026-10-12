@@ -1,5 +1,7 @@
 # ADR 0002: Local FAISS First, Optional Chroma
 
+> **Status: Superseded** by [ADR 0005](0005-merge-integrity-architecture.md) (2026-10-11). Kept for history.
+
 ## Status
 
 Accepted
@@ -10,7 +12,7 @@ The project needs semantic retrieval with a vector database while staying easy t
 
 ## Decision
 
-Use FAISS as the default local vector index and persist index metadata under the mounted data directory. Provide an optional local ChromaDB adapter through `STATEFUL_AI_VECTOR_STORE=chroma` for users who want Chroma persistence without provisioning a managed database.
+Use FAISS as the default local vector index and persist index metadata under the mounted data directory. Provide an optional local ChromaDB adapter through `AEGISMEM_VECTOR_STORE=chroma` for users who want Chroma persistence without provisioning a managed database.
 
 ## Consequences
 

@@ -1,84 +1,103 @@
-"""stateful.ai CLI — talk to a running stateful.ai service from the terminal.
+"""AegisMem CLI: talk to a running AegisMem service from the terminal.
 
-Zero extra dependencies (uses the stdlib-only SDK). Examples:
+Uses the official SDK (``aegismem_client``); configure with AEGISMEM_BASE_URL / AEGISMEM_API_KEY.
 
     python -m apps.cli health
     python -m apps.cli ingest "Alice prefers Python and FAISS." --user alice --type fact
     python -m apps.cli recall "what does alice like?" --user alice
-    python -m apps.cli feedback <query_id> <memory_id> --useful
+    python -m apps.cli feedback <retrieval_id> --user alice --used <memory_id> [<memory_id> ...]
+    python -m apps.cli correct <memory_id> --user alice --kind outdated --text "Alice now prefers Rust"
+    python -m apps.cli forget <memory_id> --user alice
     python -m apps.cli stats --user alice
+    python -m apps.cli handoff --user alice --task "plan a trip"
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from typing import Any
 
-from sdk import StatefulClient, StatefulError
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+
+from aegismem_client import AegisMemError, AegisMemSync  # noqa: E402
 
 
-def _print(obj) -> None:
+def _print(obj: Any) -> None:
+    if hasattr(obj, "model_dump"):
+        obj = obj.model_dump(mode="json")
     print(json.dumps(obj, indent=2, default=str))
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="stateful_ai", description="stateful.ai memory CLI")
-    p.add_argument("--base-url", default="http://localhost:8000")
-    p.add_argument("--api-key", default=None)
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    sp = sub.add_parser("ingest", help="store a memory")
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="aegismem", description="AegisMem command-line client")
+    ap.add_argument("--url", default=None, help="service base URL (default: $AEGISMEM_BASE_URL)")
+    ap.add_argument("--api-key", default=None, help="API key (default: $AEGISMEM_API_KEY)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("health")
+    sp = sub.add_parser("ingest")
     sp.add_argument("text")
     sp.add_argument("--user", required=True)
     sp.add_argument("--type", default="observation")
-
-    sp = sub.add_parser("recall", help="retrieve memories")
+    sp.add_argument("--source", default="user_message")
+    sp.add_argument("--origin")
+    sp = sub.add_parser("recall")
     sp.add_argument("query")
     sp.add_argument("--user", required=True)
     sp.add_argument("--top-k", type=int, default=5)
-
-    sp = sub.add_parser("update", help="smart update/supersede a memory")
-    sp.add_argument("content")
+    sp = sub.add_parser("feedback")
+    sp.add_argument("retrieval_id")
     sp.add_argument("--user", required=True)
-
-    sp = sub.add_parser("feedback", help="report usefulness of a retrieved memory")
-    sp.add_argument("query_id")
+    sp.add_argument("--used", nargs="*", default=[])
+    sp = sub.add_parser("correct")
     sp.add_argument("memory_id")
-    g = sp.add_mutually_exclusive_group()
-    g.add_argument("--useful", action="store_true")
-    g.add_argument("--not-useful", action="store_true")
-    sp.add_argument("--score", type=float, default=None)
-    sp.add_argument("--outcome", default="")
-
-    sp = sub.add_parser("stats", help="memory stats for a user")
     sp.add_argument("--user", required=True)
+    sp.add_argument("--kind", choices=["outdated", "wrong", "malicious"], required=True)
+    sp.add_argument("--text", default="")
+    sp = sub.add_parser("forget")
+    sp.add_argument("memory_ids", nargs="+")
+    sp.add_argument("--user", required=True)
+    sp.add_argument("--reason", default="cli")
+    sp = sub.add_parser("stats")
+    sp.add_argument("--user", required=True)
+    sp = sub.add_parser("handoff")
+    sp.add_argument("--user", required=True)
+    sp.add_argument("--task", default="")
+    sp.add_argument("--budget", type=int, default=1200)
+    return ap
 
-    sub.add_parser("learning", help="continual-learning stats")
-    sub.add_parser("health", help="service health")
 
-    args = p.parse_args(argv)
-    client = StatefulClient(base_url=args.base_url, api_key=args.api_key)
+def run(args: argparse.Namespace, client: AegisMemSync) -> Any:
+    if args.cmd == "health":
+        return client.health()
+    if args.cmd == "ingest":
+        return client.ingest(args.text, args.user, memory_type=args.type, source_type=args.source,
+                             origin=args.origin)
+    if args.cmd == "recall":
+        return client.retrieve(args.query, args.user, top_k=args.top_k)
+    if args.cmd == "feedback":
+        return client.feedback(args.retrieval_id, args.user, args.used)
+    if args.cmd == "correct":
+        return client.correct(args.memory_id, args.user, args.kind, corrected_text=args.text)
+    if args.cmd == "forget":
+        return client.forget(args.user, memory_ids=args.memory_ids, reason=args.reason)
+    if args.cmd == "stats":
+        return client.stats(args.user)
+    if args.cmd == "handoff":
+        return client.handoff(args.user, task=args.task, token_budget=args.budget).markdown
+    raise SystemExit(f"unknown command {args.cmd}")
 
-    try:
-        if args.cmd == "ingest":
-            _print(client.ingest(args.text, args.user, memory_type=args.type))
-        elif args.cmd == "recall":
-            _print(client.retrieve(args.query, args.user, top_k=args.top_k))
-        elif args.cmd == "update":
-            _print(client.update(args.user, args.content))
-        elif args.cmd == "feedback":
-            useful = True if args.useful else (False if args.not_useful else None)
-            _print(client.feedback(args.query_id, args.memory_id, useful=useful,
-                                   score=args.score, outcome=args.outcome))
-        elif args.cmd == "stats":
-            _print(client.stats(args.user))
-        elif args.cmd == "learning":
-            _print(client.learning_stats())
-        elif args.cmd == "health":
-            _print(client.health())
-    except StatefulError as e:
-        print(str(e), file=sys.stderr)
-        return 1
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    with AegisMemSync(args.url, args.api_key) as client:
+        try:
+            result = run(args, client)
+        except AegisMemError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+    print(result) if isinstance(result, str) else _print(result)
     return 0
 
 

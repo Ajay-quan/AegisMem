@@ -1,4 +1,4 @@
-"""Unit tests for the Stateful-CL replay buffer."""
+"""Unit tests for the AegisMem-CL replay buffer."""
 from __future__ import annotations
 
 from domain.learning.replay import CandidateRecord, ReplayBuffer

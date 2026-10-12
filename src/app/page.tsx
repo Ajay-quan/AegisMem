@@ -103,7 +103,7 @@ export default function Home() {
     <main className={`nvx-page ${loaded ? "is-loaded" : ""}`}>
       <motion.div className="nvx-scroll-progress" style={{ scaleX: progressX }} aria-hidden="true" />
       <div className="nvx-transition" aria-hidden="true">
-        <div className="nvx-load-logo">STATEFUL.AI</div>
+        <div className="nvx-load-logo">AegisMem</div>
         {Array.from({ length: 64 }).map((_, index) => (
           <span key={index} />
         ))}
@@ -115,9 +115,9 @@ export default function Home() {
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
       >
-        <a href="#top" className="nvx-logo" onClick={closeMenu} aria-label="stateful.ai home">
+        <a href="#top" className="nvx-logo" onClick={closeMenu} aria-label="AegisMem home">
           <span className="nvx-logo-mark">S</span>
-          <span>stateful.ai</span>
+          <span>AegisMem</span>
         </a>
         <div className="nvx-nav-actions">
           <div className="nvx-slots">
@@ -176,7 +176,7 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="nvx-pixel">E-mail</p>
-                  <a href="mailto:hello@stateful.ai">[ hello@stateful.ai ]</a>
+                  <a href="mailto:hello@AegisMem">[ hello@AegisMem ]</a>
                 </div>
               </motion.div>
             </div>
@@ -191,7 +191,7 @@ export default function Home() {
           <div className="nvx-hero-row nvx-hero-row-top">
             <motion.h1 initial={reduceMotion ? false : { y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}>MEMORY</motion.h1>
             <motion.p initial={reduceMotion ? false : { y: 28, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.12, duration: 0.65, ease: [0.22, 1, 0.36, 1] }}>
-              stateful.ai gives AI products a durable memory layer: capture the right context,
+              AegisMem gives AI products a durable memory layer: capture the right context,
               retrieve it when it matters, and keep it accurate over time.
             </motion.p>
           </div>
@@ -224,7 +224,7 @@ export default function Home() {
               <ArrowDown className="h-4 w-4" />
               scroll down
             </a>
-            <a href="mailto:hello@stateful.ai">hello@stateful.ai</a>
+            <a href="mailto:hello@AegisMem">hello@AegisMem</a>
           </div>
 
           <motion.a href="#contact" className="nvx-hero-btn" whileTap={reduceMotion ? undefined : { scale: 0.98 }}>
@@ -237,7 +237,7 @@ export default function Home() {
           <motion.div className="nvx-section-tag" variants={reveal}>ABOUT</motion.div>
           <motion.div className="nvx-about-box" variants={reveal}>
             <h3>
-              <em>Most</em> AI products still treat every session like a fresh start. stateful.ai
+              <em>Most</em> AI products still treat every session like a fresh start. AegisMem
               keeps important context available, organized, and governed so agents can act with
               continuity.
             </h3>
@@ -245,7 +245,7 @@ export default function Home() {
             <div className="nvx-about-lower">
               <div className="nvx-hand">☞</div>
               <p>
-                <span>stateful.ai</span> is built for teams adding long-term memory to assistants,
+                <span>AegisMem</span> is built for teams adding long-term memory to assistants,
                 copilots, and autonomous workflows. It keeps the surface area small: one place to
                 write memory, one place to retrieve it, and clear controls for change.
                 <strong> Less noise, better context.</strong>
@@ -282,7 +282,7 @@ export default function Home() {
               <p>state.graph</p>
             </div>
             <div className="nvx-memory-map">
-              <span className="node core">stateful.ai</span>
+              <span className="node core">AegisMem</span>
               <span className={`node n1 ${activeWork === 0 ? "is-hot" : ""}`}>User fact</span>
               <span className={`node n2 ${activeWork === 1 ? "is-hot" : ""}`}>Relevant recall</span>
               <span className={`node n3 ${activeWork === 2 ? "is-hot" : ""}`}>Memory update</span>
@@ -300,7 +300,7 @@ export default function Home() {
         <motion.section id="services" className="nvx-services" {...sectionMotion}>
           <motion.div className="nvx-services-header" variants={reveal}>
             <div className="nvx-section-tag">PLATFORM</div>
-            <h2>THE MEMORY LAYER FOR STATEFUL AI.</h2>
+            <h2>THE TRUST LAYER FOR AGENT MEMORY.</h2>
           </motion.div>
           {services.map((service) => (
             <motion.article className="nvx-service-card" key={service.title} variants={reveal} whileTap={reduceMotion ? undefined : { scale: 0.995 }}>
@@ -343,7 +343,7 @@ export default function Home() {
           </motion.div>
           <motion.div className="nvx-newsletter-copy" variants={reveal}>
             <div className="nvx-section-tag">USE CASES</div>
-            <h2>Where <strong>stateful.ai</strong> fits</h2>
+            <h2>Where <strong>AegisMem</strong> fits</h2>
             <p>
               Add persistent context to support agents, product copilots, internal assistants, and
               workflow automations without redesigning the entire application around memory.
@@ -375,10 +375,10 @@ export default function Home() {
             <a href="#contact">Contact</a>
           </div>
           <div>
-            <a href="mailto:hello@stateful.ai">[ hello@stateful.ai ]</a>
+            <a href="mailto:hello@AegisMem">[ hello@AegisMem ]</a>
           </div>
         </div>
-        <div className="nvx-footer-word">stateful.ai</div>
+        <div className="nvx-footer-word">AegisMem</div>
         <p>© 2026 All Rights Reserved.</p>
       </motion.footer>
     </main>

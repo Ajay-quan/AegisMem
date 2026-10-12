@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,11 +19,10 @@ from core.schemas.memory import (
     MemoryItem, RetrievalQuery, RetrievalResult, RetrievalCandidate,
 )
 from domain.memory.scoring import score_memory_for_retrieval, rank_candidates
-from domain.memory.lexical import (
-    BM25Index, reciprocal_rank_fusion, normalize_scores,
-)
-from domain.memory.reranker import build_reranker
-from core.observability import metrics
+from core.observability.metrics import GUARD_DECISIONS, observe_retrieval_results
+from core.observability.tracing import tracer
+from domain.memory.lexical import BM25Index, normalize_scores, reciprocal_rank_fusion
+from domain.memory.reranker import HeuristicReranker
 
 logger = logging.getLogger(__name__)
 
@@ -38,40 +36,60 @@ class RetrievalService:
         vector_store: Any,
         embedding_backend: Any,
         graph_store: Any | None = None,
+        learner: Any | None = None,
+        ledger: Any | None = None,
+        guard: Any | None = None,
     ) -> None:
         self._db = relational_store
         self._vs = vector_store
         self._embed = embedding_backend
         self._graph = graph_store
-        self._reranker = build_reranker(settings)
+        self._learner = learner
+        self._ledger = ledger
+        # Integrity guard is always on; pass a configured one to change the trust floor.
+        if guard is None:
+            from services.guard_service import MemoryGuard
+            guard = MemoryGuard(relational_store)
+        self._guard = guard
+        self._tenant = getattr(relational_store, "tenant_id", "unscoped")
+        self._reranker = HeuristicReranker(
+            diversity_threshold=settings.diversity_threshold,
+        )
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
-        """Main retrieval entry point — full multi-stage pipeline."""
+        """Main retrieval entry point (span: aegis.retrieve)."""
+        with tracer.start_as_current_span("aegis.retrieve") as span:
+            result = await self._retrieve(query)
+            observe_retrieval_results(len(result.candidates), result.total_found)
+            span.set_attributes({"aegis.retrieval_id": result.retrieval_id,
+                                 "aegis.returned": len(result.candidates),
+                                 "aegis.guard_interventions": len(result.guard_report),
+                                 "aegis.learned_weights": self._learner is not None})
+            return result
+
+    async def _retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         start = time.time()
-        query_id = uuid.uuid4().hex
 
-        # Stateful-CL: when enabled, pull the learned per-namespace ranking weights
-        # so the composite score adapts to feedback. Disabled => weights=None =>
-        # static settings weights => original behavior.
-        learned_weights = self._learned_weights(query)
+        # Stage 1: dense retrieval, plus BM25 over the user's corpus when hybrid is on; the
+        # two rankings are fused with Reciprocal Rank Fusion. Every fused candidate then goes
+        # through the integrity guard below, so the lexical path cannot leak revoked data.
+        dense = await self._semantic_search(query)
+        lexical = await self._lexical_search(query) if settings.hybrid_retrieval_enabled else []
+        semantic_candidates = self._fuse(dense, lexical)
+        lexical_scores = normalize_scores(lexical)
 
-        # Stage 1a: Broad dense semantic retrieval (over-retrieve).
-        semantic_candidates = await self._semantic_search(query)
-
-        # Stage 1b: Sparse lexical retrieval (BM25) when hybrid mode is on.
-        lexical_candidates: list[tuple[str, float]] = []
-        if settings.hybrid_retrieval_enabled:
-            lexical_candidates = await self._lexical_search(query)
-
-        # Stage 1c: Fuse dense + sparse rankings with Reciprocal Rank Fusion.
-        fused_ids, semantic_map, lexical_map = self._fuse(
-            semantic_candidates, lexical_candidates, query,
-        )
-
-        # Stage 2: Enrich with full records + multi-signal scoring.
+        # Stage 2: Enrich with full records + multi-signal scoring,
+        # using per-user learned weights once enough feedback exists.
+        weights = None
+        if self._learner is not None:
+            weights = await self._learner.weights_for(query.user_id)
+        guard_report: list[dict[str, Any]] = []
         enriched = await self._enrich_candidates(
-            fused_ids, semantic_map, lexical_map, query, weights=learned_weights,
+            semantic_candidates, query, weights=weights, guard_report=guard_report,
         )
+
+        for c in enriched:
+            c.lexical_score = lexical_scores.get(c.memory.memory_id, 0.0)
 
         # Stage 3: Symbolic filters (time range, type, importance).
         filtered = self._apply_filters(enriched, query)
@@ -91,76 +109,53 @@ class RetrievalService:
             except Exception:
                 pass
 
-        # Stage 6 (Stateful-CL): log the served interaction to the replay buffer so
-        # a later /feedback call can turn it into labeled training examples.
-        self._log_interaction(query_id, query, reranked)
+        latency_ms = (time.time() - start) * 1000
 
-        latency_s = time.time() - start
-        latency_ms = latency_s * 1000
-
-        mode = "hybrid" if (settings.hybrid_retrieval_enabled and lexical_candidates) else "dense"
-        metrics.observe_retrieval(mode, latency_s)
-        metrics.observe_retrieval_results(len(reranked), len(filtered))
         logger.info(
             f"Retrieved {len(reranked)}/{len(filtered)} memories for user={query.user_id} "
-            f"in {latency_ms:.1f}ms (mode={mode}, dense={len(semantic_candidates)}, "
-            f"lexical={len(lexical_candidates)}, fused={len(enriched)})"
+            f"in {latency_ms:.1f}ms (candidates={len(enriched)})"
         )
 
-        return RetrievalResult(
+        result = RetrievalResult(
             query=query,
             candidates=reranked,
             total_found=len(filtered),
+            guard_report=guard_report,
             latency_ms=latency_ms,
-            query_id=query_id if settings.continual_learning_enabled else "",
         )
+        if self._ledger is not None:
+            await self._ledger.record(result)
+        return result
 
-    # ------------------------------------------------------------- Stateful-CL
-    def _learned_weights(self, query: RetrievalQuery) -> dict[str, float] | None:
-        """Fetch learned per-namespace ranking weights when CL is enabled."""
-        if not settings.continual_learning_enabled:
-            return None
+    async def _lexical_search(self, query: RetrievalQuery) -> list[tuple[str, float]]:
+        """BM25 over the user's active memories (pure Python; rare tokens, names, ids)."""
         try:
-            from domain.learning.registry import get_ranking_policy
-            namespace = query.namespace or f"user:{query.user_id}"
-            return get_ranking_policy().weights(namespace)
-        except Exception as e:  # never let learning break serving
-            logger.debug(f"Learned-weights lookup failed: {e}")
-            return None
-
-    def _log_interaction(
-        self,
-        query_id: str,
-        query: RetrievalQuery,
-        served: list[RetrievalCandidate],
-    ) -> None:
-        """Record served candidates + features to the replay buffer."""
-        if not settings.continual_learning_enabled or not served:
-            return
-        try:
-            from domain.learning.registry import get_replay_buffer
-            from domain.learning.features import extract_features
-            from domain.learning.replay import CandidateRecord
-
-            namespace = query.namespace or f"user:{query.user_id}"
-            records = [
-                CandidateRecord(
-                    memory_id=c.memory.memory_id,
-                    features=extract_features(c),
-                    served_rank=c.rank,
-                    score=c.composite_score,
-                )
-                for c in served
-            ]
-            get_replay_buffer().log(
-                query_id=query_id,
-                user_id=query.user_id,
-                namespace=namespace,
-                query_text=query.query_text,
-                candidates=records,
+            memories = await self._db.list_memories(
+                user_id=query.user_id, namespace=query.namespace,
+                limit=settings.lexical_candidate_pool,
             )
-        except Exception as e:  # never let learning break serving
-            logger.debug(f"Replay logging failed: {e}")
+            if not memories:
+                return []
+            index = BM25Index.build([(m.memory_id, m.content) for m in memories],
+                                    k1=settings.bm25_k1, b=settings.bm25_b)
+            return index.search(query.query_text,
+                                top_k=max(settings.retrieval_top_n_candidates, query.top_k * 4))
+        except Exception as e:
+            logger.warning(f"Lexical search failed: {e}")
+            return []
+
+    @staticmethod
+    def _fuse(dense: list[tuple[str, float]], lexical: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        """RRF-ordered candidates with a blended relevance score for ranking."""
+        if not lexical:
+            return dense
+        dense_map = dict(dense)
+        lex_map = normalize_scores(lexical)
+        order = reciprocal_rank_fusion([[i for i, _ in dense], [i for i, _ in lexical]],
+                                       k=settings.rrf_k)
+        w = settings.hybrid_lexical_weight
+        return [(mid, (1 - w) * max(0.0, dense_map.get(mid, 0.0)) + w * lex_map.get(mid, 0.0))
+                for mid, _ in order]
 
     async def _semantic_search(
         self, query: RetrievalQuery,
@@ -190,100 +185,48 @@ class RetrievalService:
             logger.warning(f"Semantic search failed, falling back to DB: {e}")
             return []
 
-    async def _lexical_search(
-        self, query: RetrievalQuery,
-    ) -> list[tuple[str, float]]:
-        """Sparse BM25 search over the user's memory corpus.
-
-        Returns ``(memory_id, bm25_score)`` ranked high→low. Pure-Python and
-        infra-free; complements dense search on rare tokens, names, and IDs.
-        """
-        try:
-            memories = await self._db.list_memories(
-                user_id=query.user_id,
-                namespace=query.namespace,
-                limit=settings.lexical_candidate_pool,
-            )
-            if not memories:
-                return []
-            index = BM25Index.build(
-                [(m.memory_id, m.content) for m in memories],
-                k1=settings.bm25_k1,
-                b=settings.bm25_b,
-            )
-            pool = max(settings.retrieval_top_n_candidates, query.top_k * 4)
-            return index.search(query.query_text, top_k=pool)
-        except Exception as e:
-            logger.warning(f"Lexical search failed: {e}")
-            return []
-
-    def _fuse(
-        self,
-        semantic_hits: list[tuple[str, float]],
-        lexical_hits: list[tuple[str, float]],
-        query: RetrievalQuery,
-    ) -> tuple[list[str], dict[str, float], dict[str, float]]:
-        """Fuse dense + sparse rankings with RRF.
-
-        Returns the fused ordered id list plus per-id semantic and normalized
-        lexical score maps for downstream multi-signal scoring.
-        """
-        semantic_map = {mid: s for mid, s in semantic_hits}
-        lexical_map = normalize_scores(lexical_hits)
-
-        if not lexical_hits:
-            return [mid for mid, _ in semantic_hits], semantic_map, lexical_map
-
-        fused = reciprocal_rank_fusion(
-            [
-                [mid for mid, _ in semantic_hits],
-                [mid for mid, _ in lexical_hits],
-            ],
-            k=settings.rrf_k,
-        )
-        fused_ids = [mid for mid, _ in fused]
-        return fused_ids, semantic_map, lexical_map
-
     async def _enrich_candidates(
         self,
-        fused_ids: list[str],
-        semantic_map: dict[str, float],
-        lexical_map: dict[str, float],
+        semantic_hits: list[tuple[str, float]],
         query: RetrievalQuery,
         weights: dict[str, float] | None = None,
+        guard_report: list[dict[str, Any]] | None = None,
     ) -> list[RetrievalCandidate]:
-        """Load full memory records from DB, compute multi-signal scores.
-
-        ``weights`` overrides the static ranking weights when supplied (the
-        learned Stateful-CL per-namespace policy); ``None`` keeps static behavior.
-        """
-        candidates = []
-        for memory_id in fused_ids:
+        """Resolve hits through the integrity guard, then compute multi-signal scores."""
+        report = guard_report if guard_report is not None else []
+        cache: dict[str, Any] = {}
+        candidates: list[RetrievalCandidate] = []
+        seen: set[str] = set()
+        for memory_id, semantic_score in semantic_hits:
             try:
-                memory = await self._db.get_memory(memory_id)
-                candidate = score_memory_for_retrieval(
-                    memory,
-                    semantic_map.get(memory_id, 0.0),
-                    query_text=query.query_text,
-                    lexical_score=lexical_map.get(memory_id, 0.0),
+                memory, decision = await self._guard.resolve(memory_id, query.user_id, cache)
+                if decision.action != "serve":
+                    report.append(decision.to_dict())
+                    GUARD_DECISIONS.labels(self._tenant, decision.action, decision.reason).inc()
+                if memory is None or memory.memory_id in seen:
+                    continue
+                seen.add(memory.memory_id)
+                candidates.append(score_memory_for_retrieval(
+                    memory, semantic_score, query_text=query.query_text,
                     weights=weights,
-                )
-                candidates.append(candidate)
+                ))
             except Exception as e:
                 logger.debug(f"Could not enrich memory {memory_id}: {e}")
 
-        # Fallback: if both retrieval arms returned nothing, query DB directly.
-        if not candidates:
+        # Fallback: if semantic search returned nothing, query DB directly.
+        if not candidates and not report:
             memories = await self._db.list_memories(
                 user_id=query.user_id,
                 namespace=query.namespace,
                 limit=query.top_k * 2,
             )
             for memory in memories:
-                candidate = score_memory_for_retrieval(
+                ok, _ = await self._guard.servable(memory)
+                if not ok:
+                    continue
+                candidates.append(score_memory_for_retrieval(
                     memory, 0.5, query_text=query.query_text, weights=weights,
-                )
-                candidates.append(candidate)
+                ))
 
         return candidates
 
